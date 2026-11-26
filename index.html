@@ -378,26 +378,44 @@
     <div class="modal-box" id="modal-content"></div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
   (function () {
     "use strict";
 
     var STORAGE_KEY = "distrifood_erp_v19_state";
     var SUPABASE_URL = "https://hanamjgoztionetdttsi.supabase.co";
-    var SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhhbmFtamdvenRpb25ldGR0dHNpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTU2NDg3NjksImV4cCI6MjExMTIyNDc2OX0.KmVGJzrN5YvQ24FhtmMIDcFIt30segIKVHRKbWnzL9w";
+    var SUPABASE_PUBLISHABLE_KEY = "sb_publishable_1MVs4iqFLbztVBARt1waag_Sxj3ooJJ";
     var SUPABASE_ROW_ID = "xaherca2023_main";
+    var supabaseClient = null;
 
     var mem = {};
     var MENU_MODULES = {};
     var cloudSyncTimer = null;
     var cloudSyncStatus = "local";
     var isApplyingRemoteState = false;
+    var appBooted = false;
 
     function hasSupabaseConfig() {
       return (
         SUPABASE_URL.indexOf("https://") === 0 &&
         SUPABASE_PUBLISHABLE_KEY.length > 10
       );
+    }
+
+    function getSupabaseClient() {
+      if (supabaseClient) return supabaseClient;
+      if (
+        hasSupabaseConfig() &&
+        window.supabase &&
+        typeof window.supabase.createClient === "function"
+      ) {
+        supabaseClient = window.supabase.createClient(
+          SUPABASE_URL,
+          SUPABASE_PUBLISHABLE_KEY
+        );
+      }
+      return supabaseClient;
     }
 
     function setCloudStatus(nextStatus) {
@@ -416,66 +434,53 @@
     }
 
     function fetchCloudState() {
-      if (!hasSupabaseConfig()) return Promise.resolve(null);
-      var url =
-        SUPABASE_URL +
-        "/rest/v1/erp_state?id=eq." +
-        encodeURIComponent(SUPABASE_ROW_ID) +
-        "&select=state_json,updated_at";
+      var client = getSupabaseClient();
+      if (!client) {
+        setCloudStatus("offline");
+        return Promise.resolve(null);
+      }
 
-      return fetch(url, {
-        method: "GET",
-        headers: {
-          apikey: SUPABASE_PUBLISHABLE_KEY,
-          Authorization: "Bearer " + SUPABASE_PUBLISHABLE_KEY,
-          Accept: "application/json"
-        }
-      })
+      return client
+        .from("erp_state")
+        .select("state_json,updated_at")
+        .eq("id", SUPABASE_ROW_ID)
+        .maybeSingle()
         .then(function (res) {
-          if (!res.ok) throw new Error("HTTP " + res.status);
-          return res.json();
+          if (res.error) throw res.error;
+          return res.data && res.data.state_json ? res.data.state_json : null;
         })
-        .then(function (rows) {
-          if (Array.isArray(rows) && rows.length > 0 && rows[0].state_json) {
-            return rows[0].state_json;
-          }
-          return null;
-        })
-        .catch(function () {
+        .catch(function (err) {
+          console.error("Error leyendo erp_state en Supabase:", err);
           setCloudStatus("offline");
           return null;
         });
     }
 
     function pushCloudStateNow() {
-      if (!hasSupabaseConfig()) return Promise.resolve(false);
+      var client = getSupabaseClient();
+      if (!client) {
+        setCloudStatus("offline");
+        return Promise.resolve(false);
+      }
       setCloudStatus("syncing");
 
-      var url = SUPABASE_URL + "/rest/v1/erp_state?on_conflict=id";
-      var payload = [
-        {
-          id: SUPABASE_ROW_ID,
-          state_json: state,
-          updated_at: new Date().toISOString()
-        }
-      ];
-
-      return fetch(url, {
-        method: "POST",
-        headers: {
-          apikey: SUPABASE_PUBLISHABLE_KEY,
-          Authorization: "Bearer " + SUPABASE_PUBLISHABLE_KEY,
-          "Content-Type": "application/json",
-          Prefer: "resolution=merge-duplicates,return=minimal"
-        },
-        body: JSON.stringify(payload)
-      })
+      return client
+        .from("erp_state")
+        .upsert(
+          {
+            id: SUPABASE_ROW_ID,
+            state_json: state,
+            updated_at: new Date().toISOString()
+          },
+          { onConflict: "id" }
+        )
         .then(function (res) {
-          if (!res.ok) throw new Error("HTTP " + res.status);
+          if (res.error) throw res.error;
           setCloudStatus("synced");
           return true;
         })
-        .catch(function () {
+        .catch(function (err) {
+          console.error("Error guardando erp_state en Supabase:", err);
           setCloudStatus("offline");
           return false;
         });
@@ -1661,7 +1666,9 @@
       }
 
       var activeModule = MENU_MODULES[state.activeTab] || MENU_MODULES.ventas;
-      safeRun(activeModule, root);
+      if (typeof activeModule === "function") {
+        safeRun(activeModule, root);
+      }
     }
 
     function syncFromCloud(forceRender) {
@@ -1687,6 +1694,8 @@
     }
 
     function bootApp() {
+      if (appBooted) return;
+      appBooted = true;
       render();
       syncFromCloud(false);
     }
