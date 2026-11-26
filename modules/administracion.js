@@ -40,6 +40,54 @@
     return clean ? clean.slice(0, 2).toUpperCase() : "DF";
   }
 
+  function getSupabaseClientSafe() {
+    if (typeof ERP.getSupabaseClient === "function") {
+      return ERP.getSupabaseClient();
+    }
+    if (window.supabase && typeof window.supabase.createClient === "function") {
+      var url = ERP.SUPABASE_URL || "https://hanamjgoztionetdttsi.supabase.co";
+      var key = ERP.SUPABASE_PUBLISHABLE_KEY || "sb_publishable_1MVs4iqFLbztVBARt1waag_Sxj3ooJJ";
+      if (url && key) {
+        return window.supabase.createClient(url, key);
+      }
+    }
+    return null;
+  }
+
+  function syncAppSettingsToSql(state) {
+    if (typeof ERP.saveAppSettingsSql === "function") {
+      return ERP.saveAppSettingsSql();
+    }
+    var client = getSupabaseClientSafe();
+    if (!client || !state) return Promise.resolve(false);
+
+    var mergedCrateStock = Object.assign({}, state.crateStock || {});
+    if (state.cratePricesBs && typeof state.cratePricesBs === "object") {
+      mergedCrateStock._prices_bs = state.cratePricesBs;
+    }
+
+    return client
+      .from("app_settings")
+      .upsert(
+        {
+          id: "main",
+          rate_bs: Number(state.rateBs || 48.5),
+          rate_history: Array.isArray(state.rateHistory) ? state.rateHistory : [],
+          crate_stock: mergedCrateStock,
+          updated_at: new Date().toISOString()
+        },
+        { onConflict: "id" }
+      )
+      .then(function (res) {
+        if (res.error) throw res.error;
+        return true;
+      })
+      .catch(function (err) {
+        console.error("Error guardando app_settings en SQL:", err);
+        return false;
+      });
+  }
+
   function openUserFormModal(existingUser) {
     var state = ERP.state;
     var rolePermsMap = (ERP.ROLE_PERMS && typeof ERP.ROLE_PERMS === "object") ? ERP.ROLE_PERMS : {};
@@ -204,7 +252,7 @@
           '</tbody></table></div>' +
         '</div>' +
         '<div class="card">' +
-          '<div class="card-header"><div><h2 class="card-title">Tasa Cambiaria del Día (Historial Diario Bs/$)</h2><p class="muted">Registre o actualice la tasa cambiaria por fecha. Se guarda en el historial diario del sistema.</p></div><span class="badge b-ok">Tasa Actual: Bs. ' + Number(state.rateBs || 48.5).toFixed(4) + '</span></div>' +
+          '<div class="card-header"><div><h2 class="card-title">Tasa Cambiaria del Día (Historial Diario Bs/$)</h2><p class="muted">Registre o actualice la tasa cambiaria por fecha. Se guarda en el historial diario del sistema y en SQL.</p></div><span class="badge b-ok">Tasa Actual: Bs. ' + Number(state.rateBs || 48.5).toFixed(4) + '</span></div>' +
           '<div class="grid-3" style="align-items:end;">' +
             '<div class="field" style="margin-bottom:0;"><label>Fecha *</label><input type="date" id="adm-rate-date" value="' + ERP.esc(todayStr) + '" /></div>' +
             '<div class="field" style="margin-bottom:0;"><label>Tasa Bs/$ *</label><input type="number" step="0.0001" min="0.0001" id="adm-rate-value" value="' + ERP.esc(Number(state.rateBs || 48.5).toFixed(4)) + '" /></div>' +
@@ -277,6 +325,7 @@
 
           ERP.setNotice("ok", "Precio fijo de '" + (ctObj && ctObj.name ? ctObj.name : crateId) + "' establecido en " + formatFixedBs(newPrice) + ".");
           ERP.saveState();
+          syncAppSettingsToSql(state);
           ERP.render();
         };
       }
@@ -292,6 +341,7 @@
         if (!saved) { ERP.setNotice("bad", "No se pudo guardar la tasa cambiaria."); ERP.render(); return; }
         ERP.setNotice("ok", "Tasa del " + saved.date + " guardada en Bs. " + Number(saved.rateBs).toFixed(4) + " por $.");
         ERP.saveState();
+        syncAppSettingsToSql(state);
         ERP.render();
       };
 
@@ -322,6 +372,7 @@
           }
           ERP.setNotice("ok", "Registro de tasa de la fecha " + dStr + " eliminado.");
           ERP.saveState();
+          syncAppSettingsToSql(state);
           ERP.render();
         };
       }
@@ -401,3 +452,6 @@
 
   ERP.registerMenuModule("administracion", renderAdministracionView);
 })();
+```[cite: 9]
+
+Con `administracion.js` listo, ¿qué módulo de `modules/` te gustaría adjuntar o revisar a continuación (por ejemplo `clientes.js`, `ventas.js`, `despacho.js`, `almacen.js` o `retornables.js`)?
