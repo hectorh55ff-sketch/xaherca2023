@@ -1,0 +1,1772 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DistriFood ERP — Operación de Campo, FEFO, Retornables y Ruta</title>
+  <style>
+    :root {
+      --bg: #f3f5f9;
+      --surface: #ffffff;
+      --surface-alt: #f8fafc;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --line: #e2e8f0;
+      --brand: #0f172a;
+      --accent: #0284c7;
+      --accent-soft: #e0f2fe;
+      --ok: #15803d;
+      --ok-soft: #dcfce7;
+      --warn: #b45309;
+      --warn-soft: #fef3c7;
+      --bad: #b91c1c;
+      --bad-soft: #fee2e2;
+      --radius: 12px;
+      --shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.45;
+    }
+
+    .topbar {
+      background: var(--brand);
+      color: #fff;
+      padding: 12px 16px;
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+    .topbar-inner {
+      max-width: 1280px;
+      margin: 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .brand-box { display: flex; align-items: center; gap: 10px; }
+    .brand-logo {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #0ea5e9, #16a34a);
+      display: grid;
+      place-items: center;
+      font-weight: 800;
+      font-size: 15px;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .brand-logo img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .brand-title { font-size: 16px; font-weight: 700; margin: 0; }
+    .brand-sub { font-size: 12px; color: #cbd5e1; margin: 0; }
+
+    .session-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.18);
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+    }
+    .pill-ok {
+      background: rgba(22, 163, 74, 0.22);
+      border-color: rgba(74, 222, 128, 0.45);
+      color: #dcfce7;
+      font-weight: 600;
+    }
+    .topbar select, .topbar input {
+      background: #1e293b;
+      color: #fff;
+      border: 1px solid #475569;
+      border-radius: 8px;
+      padding: 6px 9px;
+      font-size: 12px;
+    }
+    .topbar input[type="number"] { width: 102px; }
+
+    button {
+      cursor: pointer;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
+      border-radius: 9px;
+      padding: 8px 12px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    button:hover { background: #f1f5f9; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    button.primary:hover { background: #0369a1; }
+    button.success { background: var(--ok); border-color: var(--ok); color: #fff; }
+    button.warn { background: var(--warn); border-color: var(--warn); color: #fff; }
+    button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+    button.sm { padding: 5px 9px; font-size: 12px; }
+
+    .nav-wrap {
+      background: #eef2f6;
+      border-bottom: 1px solid var(--line);
+      padding: 10px 16px;
+    }
+    .nav-inner {
+      max-width: 1280px;
+      margin: 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .nav-btn {
+      background: #fff;
+      border: 1px solid #cbd5e1;
+      color: #1e293b;
+      padding: 8px 13px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .nav-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+    .container { max-width: 1280px; margin: 16px auto 40px; padding: 0 16px; }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 16px;
+      box-shadow: var(--shadow);
+      margin-bottom: 16px;
+    }
+    .card-header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--line);
+    }
+    .card-title { margin: 0; font-size: 17px; font-weight: 700; }
+    .muted { color: var(--muted); font-size: 12.5px; }
+
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 14px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+
+    .kpi {
+      background: var(--surface-alt);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px;
+    }
+    .kpi-label { font-size: 11.5px; color: var(--muted); text-transform: uppercase; font-weight: 700; }
+    .kpi-val { font-size: 20px; font-weight: 800; margin-top: 4px; }
+    .kpi-sub { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+
+    .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
+    .field label { font-size: 12px; font-weight: 700; color: #334155; }
+    .field input, .field select, .field textarea {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 13px;
+      background: #fff;
+      color: var(--ink);
+    }
+    .preset-row {
+      display: flex;
+      gap: 5px;
+      align-items: center;
+      margin-top: 4px;
+    }
+    .preset-row select {
+      flex: 1;
+      min-width: 0;
+      padding: 6px 8px;
+      font-size: 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      background: var(--surface-alt);
+      color: var(--ink);
+    }
+    .preset-row button {
+      padding: 5px 8px;
+      font-size: 12px;
+      line-height: 1.2;
+    }
+
+    .filter-bar {
+      background: var(--surface-alt);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+
+    .avail-inv-item {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin-bottom: 6px;
+      background: #f8fafc;
+    }
+    .avail-inv-check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+      min-width: 220px;
+      cursor: pointer;
+    }
+
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th {
+      background: var(--surface-alt);
+      font-size: 11.5px;
+      text-transform: uppercase;
+      color: #475569;
+      font-weight: 700;
+    }
+    .table-wrap { overflow-x: auto; }
+
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+    .b-ok { background: var(--ok-soft); color: var(--ok); }
+    .b-warn { background: var(--warn-soft); color: var(--warn); }
+    .b-bad { background: var(--bad-soft); color: var(--bad); }
+    .b-info { background: var(--accent-soft); color: var(--accent); }
+
+    .notice {
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 14px;
+      border: 1px solid transparent;
+    }
+    .notice-ok { background: var(--ok-soft); color: var(--ok); border-color: #86efac; }
+    .notice-warn { background: var(--warn-soft); color: var(--warn); border-color: #fde68a; }
+    .notice-bad { background: var(--bad-soft); color: var(--bad); border-color: #fca5a5; }
+    .notice-info { background: var(--accent-soft); color: #0369a1; border-color: #7dd3fc; }
+
+    .nota-marginal {
+      background: #fffbeb;
+      border: 1px dashed #d97706;
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin-top: 8px;
+      font-size: 12.5px;
+    }
+
+    .perm-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 8px;
+      margin-top: 6px;
+    }
+    .perm-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface-alt);
+      font-size: 12.5px;
+      cursor: pointer;
+    }
+    .logo-preview-box {
+      width: 68px;
+      height: 68px;
+      border-radius: 12px;
+      border: 1px solid #cbd5e1;
+      background: linear-gradient(135deg, #0ea5e9, #16a34a);
+      color: #fff;
+      display: grid;
+      place-items: center;
+      font-weight: 800;
+      font-size: 20px;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .logo-preview-box img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.55);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      z-index: 60;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal-box {
+      background: #fff;
+      border-radius: 14px;
+      max-width: 820px;
+      width: 100%;
+      max-height: 88vh;
+      overflow-y: auto;
+      padding: 18px;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.25);
+    }
+
+    @media print {
+      .topbar, .nav-wrap, .no-print { display: none !important; }
+      body { background: #fff; }
+      .card { box-shadow: none; border: 1px solid #cbd5e1; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand-box" id="topbar-brand">
+        <div class="brand-logo" id="topbar-logo">DF</div>
+        <div>
+          <h1 class="brand-title" id="topbar-company-name">DistriFood ERP</h1>
+          <p class="brand-sub" id="topbar-company-sub">Operación de Campo · FEFO · Retornables · Ruta y Despacho</p>
+        </div>
+      </div>
+      <div class="session-controls" id="topbar-session"></div>
+    </div>
+  </header>
+
+  <nav class="nav-wrap">
+    <div class="nav-inner" id="main-nav"></div>
+  </nav>
+
+  <main class="container">
+    <div id="global-notice"></div>
+    <div id="app-root">
+      <div class="card">
+        <h2 class="card-title">Cargando DistriFood ERP...</h2>
+        <p class="muted">Inicializando sesión, lotes FEFO, retornables y módulos operativos.</p>
+      </div>
+    </div>
+  </main>
+
+  <div class="modal-backdrop" id="modal-backdrop" onclick="if(event.target===this) closeModal()">
+    <div class="modal-box" id="modal-content"></div>
+  </div>
+
+  <script>
+  (function () {
+    "use strict";
+
+    var STORAGE_KEY = "distrifood_erp_v19_state";
+    var SUPABASE_URL = "https://hanamjgoztionetdttsi.supabase.co";
+    var SUPABASE_PUBLISHABLE_KEY = "sb_publishable_1MVs4iqFLbztVBARt1waag_Sxj3ooJJ";
+    var SUPABASE_ROW_ID = "xaherca2023_main";
+
+    var mem = {};
+    var MENU_MODULES = {};
+    var cloudSyncTimer = null;
+    var cloudSyncStatus = "local";
+    var isApplyingRemoteState = false;
+
+    function hasSupabaseConfig() {
+      return (
+        SUPABASE_URL.indexOf("https://") === 0 &&
+        SUPABASE_PUBLISHABLE_KEY.length > 10
+      );
+    }
+
+    function setCloudStatus(nextStatus) {
+      cloudSyncStatus = nextStatus;
+      var pill = document.getElementById("pill-cloud-status");
+      if (!pill) return;
+      if (nextStatus === "synced") {
+        pill.textContent = "Nube: Sincronizado";
+      } else if (nextStatus === "syncing") {
+        pill.textContent = "Nube: Guardando...";
+      } else if (nextStatus === "offline") {
+        pill.textContent = "Nube: Local / Sin red";
+      } else {
+        pill.textContent = "Nube: Local";
+      }
+    }
+
+    function fetchCloudState() {
+      if (!hasSupabaseConfig()) return Promise.resolve(null);
+      var url =
+        SUPABASE_URL +
+        "/rest/v1/erp_state?id=eq." +
+        encodeURIComponent(SUPABASE_ROW_ID) +
+        "&select=state_json,updated_at";
+
+      return fetch(url, {
+        method: "GET",
+        headers: {
+          apikey: SUPABASE_PUBLISHABLE_KEY,
+          Authorization: "Bearer " + SUPABASE_PUBLISHABLE_KEY,
+          Accept: "application/json"
+        }
+      })
+        .then(function (res) {
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          return res.json();
+        })
+        .then(function (rows) {
+          if (Array.isArray(rows) && rows.length > 0 && rows[0].state_json) {
+            return rows[0].state_json;
+          }
+          return null;
+        })
+        .catch(function () {
+          setCloudStatus("offline");
+          return null;
+        });
+    }
+
+    function pushCloudStateNow() {
+      if (!hasSupabaseConfig()) return Promise.resolve(false);
+      setCloudStatus("syncing");
+
+      var url = SUPABASE_URL + "/rest/v1/erp_state?on_conflict=id";
+      var payload = [
+        {
+          id: SUPABASE_ROW_ID,
+          state_json: state,
+          updated_at: new Date().toISOString()
+        }
+      ];
+
+      return fetch(url, {
+        method: "POST",
+        headers: {
+          apikey: SUPABASE_PUBLISHABLE_KEY,
+          Authorization: "Bearer " + SUPABASE_PUBLISHABLE_KEY,
+          "Content-Type": "application/json",
+          Prefer: "resolution=merge-duplicates,return=minimal"
+        },
+        body: JSON.stringify(payload)
+      })
+        .then(function (res) {
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          setCloudStatus("synced");
+          return true;
+        })
+        .catch(function () {
+          setCloudStatus("offline");
+          return false;
+        });
+    }
+
+    function scheduleCloudSave() {
+      if (!hasSupabaseConfig() || isApplyingRemoteState) return;
+      setCloudStatus("syncing");
+      if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
+      cloudSyncTimer = setTimeout(function () {
+        pushCloudStateNow();
+      }, 450);
+    }
+
+    function registerMenuModule(tabId, renderFn) {
+      if (tabId && typeof renderFn === "function") {
+        MENU_MODULES[tabId] = renderFn;
+      }
+    }
+
+    function getStore(k) {
+      try { if (window.localStorage) return window.localStorage.getItem(k); } catch (e) {}
+      return Object.prototype.hasOwnProperty.call(mem, k) ? mem[k] : null;
+    }
+    function setStore(k, v) {
+      try { if (window.localStorage) { window.localStorage.setItem(k, v); return; } } catch (e) {}
+      mem[k] = v;
+    }
+    function delStore(k) {
+      try { if (window.localStorage) window.localStorage.removeItem(k); } catch (e) {}
+      delete mem[k];
+    }
+
+    var ALL_PERMS = [
+      { key: "ventas", label: "Facturar y Ver Ventas" },
+      { key: "clientes", label: "Clientes" },
+      { key: "despacho", label: "Despacho y Devoluciones" },
+      { key: "consolidado", label: "Consolidado de Carga" },
+      { key: "compras", label: "Compras Multi-SKU" },
+      { key: "almacen", label: "Almacén / FEFO" },
+      { key: "retornables", label: "Retornables y Cobranza" },
+      { key: "visitas", label: "Visitas y Encuestas" },
+      { key: "reportes", label: "Reportes" },
+      { key: "eliminar_factura", label: "Eliminar Factura (No Recepción)" },
+      { key: "administracion", label: "Administración (Empresa y Usuarios)" }
+    ];
+
+    var ROLE_PERMS = {
+      Administrador: ["ventas", "clientes", "despacho", "visitas", "retornables", "compras", "almacen", "consolidado", "reportes", "eliminar_factura", "administracion"],
+      Gerente: ["ventas", "clientes", "despacho", "visitas", "retornables", "compras", "almacen", "consolidado", "reportes", "eliminar_factura", "administracion"],
+      Supervisor: ["ventas", "clientes", "despacho", "visitas", "almacen", "consolidado", "reportes"],
+      Vendedor: ["ventas", "despacho", "visitas", "retornables", "almacen"]
+    };
+
+    var DEFAULT_COMPANY = {
+      name: "DistriFood ERP",
+      address: "Av. 15 Delicias, Zona Industrial, Maracaibo, Zulia",
+      phones: "0414-3120091 / 0261-7410020",
+      email: "operaciones@distrifood.com",
+      rif: "J-40982133-0",
+      logoDataUrl: ""
+    };
+
+    var DEFAULT_USERS = [
+      { id: "u1", name: "Carlos Admin", password: "1234", role: "Administrador", zone: "Nacional", phone: "0414-0001001", email: "admin@distrifood.com", active: true, perms: ROLE_PERMS.Administrador.slice() },
+      { id: "u2", name: "Valeria Gerente", password: "1234", role: "Gerente", zone: "Occidente / Zulia", phone: "0424-0001002", email: "gerencia@distrifood.com", active: true, perms: ROLE_PERMS.Gerente.slice() },
+      { id: "u3", name: "Mateo Supervisor", password: "1234", role: "Supervisor", zone: "Ruta Norte", phone: "0412-0001003", email: "supervisor@distrifood.com", active: true, perms: ROLE_PERMS.Supervisor.slice() },
+      { id: "u4", name: "Sofía Vendedor", password: "1234", role: "Vendedor", zone: "Ruta Centro", phone: "0416-0001004", email: "ventas@distrifood.com", active: true, perms: ROLE_PERMS.Vendedor.slice() }
+    ];
+
+    var CLIENT_TYPES = ["Normal", "Mayorista", "Distribuidor"];
+
+    var DEFAULT_CRATE_TYPES = [
+      { id: "cesta_refresco_24", name: "Cesta Refresco 24x" },
+      { id: "cesta_cerveza_36", name: "Cesta Cerveza 36x" },
+      { id: "botellon_garrafon", name: "Botellón / Garrafón" }
+    ];
+
+    var DEFAULT_TRUCKS = [
+      "Camión NQR-04 (Placa A78BC2D)",
+      "Camión NPR-09 (Placa B19DF4K)",
+      "Furgón FTR-12 (Placa C54GH8M)"
+    ];
+
+    var DEFAULT_DRIVERS = [
+      "José Contreras",
+      "Ramón Pérez",
+      "Luis Mendoza"
+    ];
+
+    var DEFAULT_ROUTES = [
+      "Ruta Centro / Norte",
+      "Ruta Sur / Lago",
+      "Occidente / Zulia"
+    ];
+
+    var DEFAULT_SKUS = [
+      { sku: "PEP-2L", name: "Pepsi Cola 2L (6-Pack)", brand: "Pepsi", priceUsd: 6.80, pricesByType: { Normal: 6.80, Mayorista: 6.20, Distribuidor: 5.65 }, costUsd: 4.70, weightKg: 12.4, crateType: "cesta_refresco_24" },
+      { sku: "7UP-1.5L", name: "7Up Limón 1.5L (6-Pack)", brand: "Pepsi", priceUsd: 5.90, pricesByType: { Normal: 5.90, Mayorista: 5.35, Distribuidor: 4.85 }, costUsd: 4.00, weightKg: 9.6, crateType: "cesta_refresco_24" },
+      { sku: "POL-LATA", name: "Cerveza Polar Pilsen Lata 24x", brand: "Polar", priceUsd: 14.50, pricesByType: { Normal: 14.50, Mayorista: 13.40, Distribuidor: 12.40 }, costUsd: 10.20, weightKg: 8.9, crateType: "cesta_cerveza_36" },
+      { sku: "SOL-RET", name: "Solera Verde Retornable 36x", brand: "Polar", priceUsd: 16.00, pricesByType: { Normal: 16.00, Mayorista: 14.80, Distribuidor: 13.70 }, costUsd: 11.40, weightKg: 15.2, crateType: "cesta_cerveza_36" },
+      { sku: "MIZ-600", name: "Agua Minalba 600ml (24-Pack)", brand: "Polar", priceUsd: 6.20, pricesByType: { Normal: 6.20, Mayorista: 5.60, Distribuidor: 5.10 }, costUsd: 4.10, weightKg: 14.8, crateType: "botellon_garrafon" }
+    ];
+
+    var DEFAULT_CLIENTS = [
+      { id: "c1", name: "Bodegón El Samán", rif: "J-40128941-2", clientType: "Normal", zone: "Ruta Centro", creditUsd: 1200, creditDays: 15, phone: "0414-3120091", email: "elsaman@districliente.com", address: "Av. 15 Delicias, Local 4" },
+      { id: "c2", name: "Minimarket La Lago", rif: "J-30981122-0", clientType: "Mayorista", zone: "Ruta Norte", creditUsd: 1800, creditDays: 30, phone: "0424-6182210", email: "lalago@districliente.com", address: "Av. 2 El Milagro, CC Lago" },
+      { id: "c3", name: "Licorería & Víveres San José", rif: "J-50021983-4", clientType: "Normal", zone: "Ruta Centro", creditUsd: 950, creditDays: 8, phone: "0412-7004419", email: "sanjose@districliente.com", address: "Calle 72 con Av. 12" },
+      { id: "c4", name: "Distribuidora Delicias Occidente", rif: "J-29841200-1", clientType: "Distribuidor", zone: "Ruta Norte", creditUsd: 2500, creditDays: 21, phone: "0416-5501928", email: "delicias@districliente.com", address: "Sector Bella Vista, Edif. Sol" }
+    ];
+
+    function getTodayIsoDate() {
+      var now = new Date();
+      var y = now.getFullYear();
+      var m = String(now.getMonth() + 1).padStart(2, "0");
+      var d = String(now.getDate()).padStart(2, "0");
+      return y + "-" + m + "-" + d;
+    }
+
+    function getNowTimeStr() {
+      var now = new Date();
+      return String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
+    }
+
+    function cloneDefaultUsers() {
+      return DEFAULT_USERS.map(function (u) {
+        return Object.assign({}, u, { perms: Array.isArray(u.perms) ? u.perms.slice() : [] });
+      });
+    }
+
+    function defaultState() {
+      var todayStr = getTodayIsoDate();
+      return {
+        company: Object.assign({}, DEFAULT_COMPANY),
+        users: cloneDefaultUsers(),
+        currentUserId: "u1",
+        isLoggedIn: true,
+        rateBs: 48.5000,
+        rateHistory: [
+          { date: todayStr, rateBs: 48.5000, updatedAt: "08:00", updatedBy: "Carlos Admin" }
+        ],
+        activeTab: "ventas",
+        reportMode: "global",
+        skuFilterQuery: "",
+        skuFilterBrand: "ALL",
+        skuFilterCrate: "ALL",
+        skuFilterStock: "ALL",
+        topSkuFromDate: "2026-11-01",
+        topSkuToDate: "2026-11-30",
+        notice: null,
+        crateTypes: DEFAULT_CRATE_TYPES.map(function (ct) { return { id: ct.id, name: ct.name }; }),
+        truckPresets: DEFAULT_TRUCKS.slice(),
+        driverPresets: DEFAULT_DRIVERS.slice(),
+        routePresets: DEFAULT_ROUTES.slice(),
+        skus: DEFAULT_SKUS.map(function (s) {
+          return Object.assign({}, s, { pricesByType: Object.assign({}, s.pricesByType) });
+        }),
+        clients: DEFAULT_CLIENTS.slice(),
+        lots: [
+          { id: "L-101", sku: "PEP-2L", qty: 45, expiry: "2027-01-15", warehouse: "Almacén Principal" },
+          { id: "L-102", sku: "PEP-2L", qty: 60, expiry: "2027-04-10", warehouse: "Almacén Principal" },
+          { id: "L-201", sku: "7UP-1.5L", qty: 38, expiry: "2026-12-28", warehouse: "Almacén Principal" },
+          { id: "L-301", sku: "POL-LATA", qty: 50, expiry: "2027-02-20", warehouse: "Almacén Frío/Seco" },
+          { id: "L-401", sku: "SOL-RET", qty: 30, expiry: "2027-03-18", warehouse: "Almacén Principal" },
+          { id: "L-501", sku: "MIZ-600", qty: 55, expiry: "2027-06-30", warehouse: "Almacén Principal" }
+        ],
+        quarantine: [],
+        crateStock: { cesta_refresco_24: 180, cesta_cerveza_36: 140, botellon_garrafon: 95 },
+        clientCrateDebt: {
+          c1: { cesta_refresco_24: 12, cesta_cerveza_36: 4, botellon_garrafon: 2 },
+          c2: { cesta_refresco_24: 8, cesta_cerveza_36: 10, botellon_garrafon: 5 },
+          c3: { cesta_refresco_24: 5, cesta_cerveza_36: 3, botellon_garrafon: 0 },
+          c4: { cesta_refresco_24: 6, cesta_cerveza_36: 2, botellon_garrafon: 3 }
+        },
+        clientBalanceUsd: { c1: 145.60, c2: 210.00, c3: 0.00, c4: 88.40 },
+        collectionLog: [],
+        invoices: [
+          {
+            id: "FAC-1001",
+            date: "2026-11-22",
+            clientId: "c1",
+            sellerName: "Sofía Vendedor",
+            status: "En Despacho",
+            items: [
+              { sku: "PEP-2L", qty: 10, unitPriceUsd: 6.80, lotAllocations: [{ lotId: "L-101", qty: 10 }] },
+              { sku: "POL-LATA", qty: 5, unitPriceUsd: 14.50, lotAllocations: [{ lotId: "L-301", qty: 5 }] }
+            ],
+            cratesDelivered: { cesta_refresco_24: 4, cesta_cerveza_36: 5, botellon_garrafon: 0 },
+            cratesReturned: { cesta_refresco_24: 2, cesta_cerveza_36: 2, botellon_garrafon: 0 },
+            marginalNote: "Nota Marginal Retornables: +2 Cesta Refresco 24x entregados sin retorno (Saldo total cliente: 12) | +3 Cesta Cerveza 36x entregados sin retorno (Saldo total cliente: 4).",
+            totalUsd: 140.50,
+            returnsLog: []
+          },
+          {
+            id: "FAC-1002",
+            date: "2026-11-23",
+            clientId: "c2",
+            sellerName: "Mateo Supervisor",
+            status: "En Despacho",
+            items: [
+              { sku: "7UP-1.5L", qty: 8, unitPriceUsd: 5.35, lotAllocations: [{ lotId: "L-201", qty: 8 }] },
+              { sku: "MIZ-600", qty: 6, unitPriceUsd: 5.60, lotAllocations: [{ lotId: "L-501", qty: 6 }] }
+            ],
+            cratesDelivered: { cesta_refresco_24: 3, cesta_cerveza_36: 0, botellon_garrafon: 6 },
+            cratesReturned: { cesta_refresco_24: 1, cesta_cerveza_36: 0, botellon_garrafon: 4 },
+            marginalNote: "Nota Marginal Retornables: +2 Cesta Refresco 24x entregados sin retorno (Saldo total cliente: 8) | +2 Botellón / Garrafón entregados sin retorno (Saldo total cliente: 5).",
+            totalUsd: 76.40,
+            returnsLog: []
+          }
+        ],
+        deletedInvoices: [],
+        purchases: [
+          {
+            id: "CMP-501",
+            date: "2026-11-20",
+            supplier: "Alimentos Polar C.A.",
+            lines: [
+              { sku: "POL-LATA", qty: 50, costUsd: 10.20, lotId: "L-301", expiry: "2027-02-20" },
+              { sku: "SOL-RET", qty: 30, costUsd: 11.40, lotId: "L-401", expiry: "2027-03-18" }
+            ],
+            totalUsd: 852.00
+          }
+        ],
+        visits: [
+          {
+            id: "VIS-301",
+            date: "2026-11-23",
+            clientId: "c1",
+            userName: "Sofía Vendedor",
+            exhibicionOk: "Sí — Nevera y anaquel frontal",
+            stockOut: "No",
+            surveyScore: 5,
+            notes: "Pedido de reposición listo para despacho matutino."
+          }
+        ],
+        consolidations: [
+          {
+            id: "CONS-2026-01",
+            date: "2026-11-23",
+            truck: "Camión NQR-04 (Placa A78BC2D)",
+            driver: "José Contreras",
+            routeZone: "Ruta Centro / Norte",
+            invoiceIds: ["FAC-1001", "FAC-1002"],
+            skuTotals: [
+              { sku: "PEP-2L", name: "Pepsi Cola 2L (6-Pack)", qty: 10, weightKg: 124.0, totalUsd: 68.00 },
+              { sku: "POL-LATA", name: "Cerveza Polar Pilsen Lata 24x", qty: 5, weightKg: 44.5, totalUsd: 72.50 },
+              { sku: "7UP-1.5L", name: "7Up Limón 1.5L (6-Pack)", qty: 8, weightKg: 76.8, totalUsd: 42.80 },
+              { sku: "MIZ-600", name: "Agua Minalba 600ml (24-Pack)", qty: 6, weightKg: 88.8, totalUsd: 33.60 }
+            ],
+            grandUnits: 29,
+            grandWeightKg: 334.1,
+            grandUsd: 216.90
+          }
+        ],
+        draftSaleLines: [{ sku: "PEP-2L", qty: 4 }],
+        draftPurchaseLines: [{ sku: "PEP-2L", qty: 20, costUsd: 4.70, expiry: "2027-05-15" }]
+      };
+    }
+
+    function normalizeRateHistory(rawList, fallbackRate) {
+      var list = Array.isArray(rawList) ? rawList.slice() : [];
+      var clean = [];
+      var seenDates = {};
+      for (var i = 0; i < list.length; i++) {
+        var item = list[i];
+        if (!item || !item.date) continue;
+        var dt = String(item.date).trim();
+        var r = parseFloat(item.rateBs);
+        if (!dt || isNaN(r) || r <= 0) continue;
+        if (seenDates[dt]) continue;
+        seenDates[dt] = true;
+        clean.push({
+          date: dt,
+          rateBs: Number(r.toFixed(4)),
+          updatedAt: String(item.updatedAt || "08:00"),
+          updatedBy: String(item.updatedBy || "Sistema")
+        });
+      }
+      var today = getTodayIsoDate();
+      var baseRate = (!isNaN(parseFloat(fallbackRate)) && parseFloat(fallbackRate) > 0) ? Number(parseFloat(fallbackRate).toFixed(4)) : 48.5000;
+      if (!seenDates[today]) {
+        clean.push({
+          date: today,
+          rateBs: baseRate,
+          updatedAt: getNowTimeStr(),
+          updatedBy: "Sistema"
+        });
+      }
+      clean.sort(function (a, b) { return String(b.date).localeCompare(String(a.date)); });
+      return clean;
+    }
+
+    function recordDailyRate(dateStr, newRateBs, userName) {
+      var dt = String(dateStr || getTodayIsoDate()).trim();
+      var val = parseFloat(newRateBs);
+      if (!dt || isNaN(val) || val <= 0) return null;
+      var rounded = Number(val.toFixed(4));
+      var who = String(userName || (getUser() && getUser().name) || "Administrador");
+      var timeNow = getNowTimeStr();
+      var list = normalizeRateHistory(state.rateHistory, rounded);
+      var found = false;
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].date === dt) {
+          list[i].rateBs = rounded;
+          list[i].updatedAt = timeNow;
+          list[i].updatedBy = who;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        list.push({ date: dt, rateBs: rounded, updatedAt: timeNow, updatedBy: who });
+      }
+      list.sort(function (a, b) { return String(b.date).localeCompare(String(a.date)); });
+      state.rateHistory = list;
+
+      var today = getTodayIsoDate();
+      if (dt === today || !list.some(function (x) { return x.date === today; })) {
+        state.rateBs = rounded;
+      } else {
+        for (var j = 0; j < list.length; j++) {
+          if (list[j].date === today) {
+            state.rateBs = Number(list[j].rateBs);
+            break;
+          }
+        }
+      }
+      return { date: dt, rateBs: rounded, updatedAt: timeNow, updatedBy: who };
+    }
+
+    function deleteRateHistoryEntry(dateStr) {
+      var dt = String(dateStr || "").trim();
+      var list = normalizeRateHistory(state.rateHistory, state.rateBs);
+      var today = getTodayIsoDate();
+      if (dt === today) {
+        return { ok: false, error: "No puede eliminar la tasa del día actual (" + dt + "). Puede modificarla en su lugar." };
+      }
+      if (list.length <= 1) {
+        return { ok: false, error: "Debe mantenerse al menos un registro en el historial de tasas." };
+      }
+      var filtered = list.filter(function (x) { return x.date !== dt; });
+      if (filtered.length === list.length) {
+        return { ok: false, error: "No se encontró el registro de la fecha " + dt + "." };
+      }
+      state.rateHistory = filtered;
+      return { ok: true };
+    }
+
+    function normalizeLoadedState(p) {
+      var b = defaultState();
+      if (!p || typeof p !== "object" || !Array.isArray(p.invoices) || !Array.isArray(p.lots)) return b;
+      var mergedCompany = Object.assign({}, DEFAULT_COMPANY, p.company || {});
+      var mergedUsers = Array.isArray(p.users) && p.users.length
+        ? p.users.map(function (u) {
+            var fallbackPerms = (ROLE_PERMS[u.role] || ROLE_PERMS.Vendedor).slice();
+            var uPerms = Array.isArray(u.perms) ? u.perms.slice() : fallbackPerms;
+            if (u.role === "Administrador" && uPerms.indexOf("administracion") === -1) {
+              uPerms.push("administracion");
+            }
+            return Object.assign({ password: "1234", phone: "", email: "", active: true }, u, { perms: uPerms });
+          })
+        : cloneDefaultUsers();
+      var mergedCrateTypes = Array.isArray(p.crateTypes) && p.crateTypes.length
+        ? p.crateTypes.map(function (ct) { return { id: String(ct.id), name: String(ct.name || ct.id) }; })
+        : b.crateTypes;
+      var mergedClients = Array.isArray(p.clients) && p.clients.length ? p.clients.map(function (c) {
+        return Object.assign({ clientType: "Normal" }, c);
+      }) : b.clients;
+      var mergedSkus = Array.isArray(p.skus) && p.skus.length ? p.skus.map(function (s) {
+        var pBy = Object.assign({ Normal: Number(s.priceUsd || 0), Mayorista: Number(s.priceUsd || 0), Distribuidor: Number(s.priceUsd || 0) }, s.pricesByType || {});
+        return Object.assign({}, s, { pricesByType: pBy });
+      }) : b.skus;
+
+      var rateVal = (!isNaN(parseFloat(p.rateBs)) && parseFloat(p.rateBs) > 0) ? Number(parseFloat(p.rateBs).toFixed(4)) : b.rateBs;
+      var histVal = normalizeRateHistory(p.rateHistory, rateVal);
+      var today = getTodayIsoDate();
+      for (var rIdx = 0; rIdx < histVal.length; rIdx++) {
+        if (histVal[rIdx].date === today) {
+          rateVal = Number(Number(histVal[rIdx].rateBs).toFixed(4));
+          break;
+        }
+      }
+
+      return Object.assign({}, b, p, {
+        company: mergedCompany,
+        users: mergedUsers,
+        rateBs: rateVal,
+        rateHistory: histVal,
+        reportMode: p.reportMode || "global",
+        skuFilterQuery: typeof p.skuFilterQuery === "string" ? p.skuFilterQuery : "",
+        skuFilterBrand: p.skuFilterBrand || "ALL",
+        skuFilterCrate: p.skuFilterCrate || "ALL",
+        skuFilterStock: p.skuFilterStock || "ALL",
+        topSkuFromDate: p.topSkuFromDate || "2026-11-01",
+        topSkuToDate: p.topSkuToDate || "2026-11-30",
+        crateTypes: mergedCrateTypes,
+        truckPresets: Array.isArray(p.truckPresets) && p.truckPresets.length ? p.truckPresets.map(String) : b.truckPresets,
+        driverPresets: Array.isArray(p.driverPresets) && p.driverPresets.length ? p.driverPresets.map(String) : b.driverPresets,
+        routePresets: Array.isArray(p.routePresets) && p.routePresets.length ? p.routePresets.map(String) : b.routePresets,
+        skus: mergedSkus,
+        clients: mergedClients,
+        crateStock: Object.assign({}, b.crateStock, p.crateStock || {}),
+        clientCrateDebt: Object.assign({}, b.clientCrateDebt, p.clientCrateDebt || {}),
+        clientBalanceUsd: Object.assign({}, b.clientBalanceUsd, p.clientBalanceUsd || {}),
+        collectionLog: Array.isArray(p.collectionLog) ? p.collectionLog : [],
+        quarantine: Array.isArray(p.quarantine) ? p.quarantine : [],
+        deletedInvoices: Array.isArray(p.deletedInvoices) ? p.deletedInvoices : [],
+        consolidations: Array.isArray(p.consolidations) ? p.consolidations : b.consolidations,
+        draftSaleLines: Array.isArray(p.draftSaleLines) ? p.draftSaleLines : b.draftSaleLines,
+        draftPurchaseLines: Array.isArray(p.draftPurchaseLines) ? p.draftPurchaseLines : b.draftPurchaseLines
+      });
+    }
+
+    function loadState() {
+      var raw = getStore(STORAGE_KEY);
+      if (!raw) return defaultState();
+      try {
+        return normalizeLoadedState(JSON.parse(raw));
+      } catch (e) {
+        return defaultState();
+      }
+    }
+
+    var state = loadState();
+    function saveState() {
+      setStore(STORAGE_KEY, JSON.stringify(state));
+      if (window.DistriFoodERP) window.DistriFoodERP.state = state;
+      scheduleCloudSave();
+    }
+
+    function getCompany() {
+      if (!state.company || typeof state.company !== "object") state.company = Object.assign({}, DEFAULT_COMPANY);
+      return state.company;
+    }
+
+    function getCompanyInitials(name) {
+      var words = String(name || "DF").trim().split(/\s+/).filter(Boolean);
+      if (!words.length) return "DF";
+      if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+      return (words[0][0] + words[1][0]).toUpperCase();
+    }
+
+    function getUsers() {
+      if (!Array.isArray(state.users) || !state.users.length) state.users = cloneDefaultUsers();
+      return state.users;
+    }
+
+    function getCrateTypes() {
+      return Array.isArray(state.crateTypes) && state.crateTypes.length ? state.crateTypes : DEFAULT_CRATE_TYPES;
+    }
+
+    function getPresets(kind) {
+      if (kind === "truck") return Array.isArray(state.truckPresets) && state.truckPresets.length ? state.truckPresets : DEFAULT_TRUCKS;
+      if (kind === "driver") return Array.isArray(state.driverPresets) && state.driverPresets.length ? state.driverPresets : DEFAULT_DRIVERS;
+      if (kind === "route") return Array.isArray(state.routePresets) && state.routePresets.length ? state.routePresets : DEFAULT_ROUTES;
+      return [];
+    }
+
+    function setPresetsList(kind, list) {
+      if (kind === "truck") state.truckPresets = list;
+      if (kind === "driver") state.driverPresets = list;
+      if (kind === "route") state.routePresets = list;
+    }
+
+    function addPresetValue(kind, val) {
+      var clean = String(val || "").trim();
+      if (!clean) return "";
+      var list = getPresets(kind).slice();
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].toLowerCase() === clean.toLowerCase()) return list[i];
+      }
+      list.push(clean);
+      setPresetsList(kind, list);
+      return clean;
+    }
+
+    function editPresetValue(kind, oldVal, newVal) {
+      var cleanNew = String(newVal || "").trim();
+      if (!cleanNew) return null;
+      var list = getPresets(kind).slice();
+      var idx = list.indexOf(oldVal);
+      if (idx === -1) {
+        for (var i = 0; i < list.length; i++) {
+          if (String(list[i]).toLowerCase() === String(oldVal || "").toLowerCase()) { idx = i; break; }
+        }
+      }
+      if (idx !== -1) list[idx] = cleanNew;
+      else list.push(cleanNew);
+      setPresetsList(kind, list);
+      if (oldVal && oldVal !== cleanNew) {
+        for (var j = 0; j < state.consolidations.length; j++) {
+          var c = state.consolidations[j];
+          if (kind === "truck" && c.truck === oldVal) c.truck = cleanNew;
+          if (kind === "driver" && c.driver === oldVal) c.driver = cleanNew;
+          if (kind === "route" && c.routeZone === oldVal) c.routeZone = cleanNew;
+        }
+      }
+      return cleanNew;
+    }
+
+    function deletePresetValue(kind, targetVal) {
+      var list = getPresets(kind).slice();
+      var filtered = list.filter(function (item) { return item !== targetVal; });
+      if (!filtered.length) {
+        var fallback = kind === "truck" ? DEFAULT_TRUCKS[0] : (kind === "driver" ? DEFAULT_DRIVERS[0] : DEFAULT_ROUTES[0]);
+        filtered = [fallback];
+      }
+      setPresetsList(kind, filtered);
+      return filtered[0];
+    }
+
+    function openAddPresetModal(kind, onDone) {
+      var labels = {
+        truck: { title: "Agregar Camión a Lista Guardada", fieldLabel: "Descripción / Placa del Camión *", placeholder: "Ej. Camión NKR-11 (Placa D22KL9P)" },
+        driver: { title: "Agregar Chofer a Lista Guardada", fieldLabel: "Nombre del Chofer *", placeholder: "Ej. Carlos Rodríguez" },
+        route: { title: "Agregar Ruta a Lista Guardada", fieldLabel: "Nombre de la Ruta *", placeholder: "Ej. Ruta Este / Aeropuerto" }
+      };
+      var meta = labels[kind] || labels.route;
+
+      openModal(
+        '<div class="card-header"><div><h3 class="card-title">' + esc(meta.title) + '</h3><p class="muted">Quedará guardado en la lista para seleccionarlo rápido en futuros despachos.</p></div><button type="button" class="sm" onclick="closeModal()">Cerrar</button></div>' +
+        '<div class="field"><label>' + esc(meta.fieldLabel) + '</label><input type="text" id="preset-new-val" placeholder="' + esc(meta.placeholder) + '" /></div>' +
+        '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;"><button type="button" class="sm" onclick="closeModal()">Cancelar</button><button type="button" class="success sm" id="btn-save-preset">Guardar en Lista</button></div>'
+      );
+
+      document.getElementById("btn-save-preset").onclick = function () {
+        var v = (document.getElementById("preset-new-val").value || "").trim();
+        if (!v) { setNotice("bad", "Debe ingresar un valor válido."); closeModal(); render(); return; }
+        var saved = addPresetValue(kind, v);
+        saveState();
+        closeModal();
+        setNotice("ok", "'" + saved + "' agregado a la lista guardada.");
+        if (typeof onDone === "function") onDone(saved);
+        else render();
+      };
+    }
+
+    function openEditPresetModal(kind, currentVal, onDone) {
+      var kindName = kind === "truck" ? "Camión" : (kind === "driver" ? "Chofer" : "Ruta");
+      openModal(
+        '<div class="card-header"><div><h3 class="card-title">Modificar ' + esc(kindName) + ' en Lista</h3></div><button type="button" class="sm" onclick="closeModal()">Cerrar</button></div>' +
+        '<div class="field"><label>Nuevo Valor para ' + esc(kindName) + ' *</label><input type="text" id="preset-edit-val" value="' + esc(currentVal || "") + '" /></div>' +
+        '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;"><button type="button" class="sm" onclick="closeModal()">Cancelar</button><button type="button" class="success sm" id="btn-update-preset">Guardar Cambio</button></div>'
+      );
+
+      document.getElementById("btn-update-preset").onclick = function () {
+        var v = (document.getElementById("preset-edit-val").value || "").trim();
+        if (!v) { setNotice("bad", "El valor no puede quedar vacío."); closeModal(); render(); return; }
+        var updated = editPresetValue(kind, currentVal, v);
+        saveState();
+        closeModal();
+        setNotice("ok", kindName + " actualizado a '" + updated + "'.");
+        if (typeof onDone === "function") onDone(updated);
+        else render();
+      };
+    }
+
+    function handleDeletePreset(kind, selectedVal, onDone) {
+      var kindName = kind === "truck" ? "Camión" : (kind === "driver" ? "Chofer" : "Ruta");
+      var nextVal = deletePresetValue(kind, selectedVal);
+      saveState();
+      setNotice("ok", "'" + selectedVal + "' eliminado de la lista de " + kindName.toLowerCase() + "s.");
+      if (typeof onDone === "function") onDone(nextVal);
+      else render();
+    }
+
+    function getSkus() { return Array.isArray(state.skus) && state.skus.length ? state.skus : DEFAULT_SKUS; }
+    function getClients() { return Array.isArray(state.clients) && state.clients.length ? state.clients : DEFAULT_CLIENTS; }
+
+    function getUser() {
+      var list = getUsers();
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].id === state.currentUserId) return list[i];
+      }
+      return list[0];
+    }
+
+    function hasPerm(perm) {
+      var u = getUser();
+      if (!u) return false;
+      if (Array.isArray(u.perms)) return u.perms.indexOf(perm) !== -1;
+      return (ROLE_PERMS[u.role] || []).indexOf(perm) !== -1;
+    }
+
+    function getSku(code) {
+      var list = getSkus();
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].sku === code) return list[i];
+      }
+      return { sku: code, name: code, brand: "", priceUsd: 0, pricesByType: { Normal: 0, Mayorista: 0, Distribuidor: 0 }, costUsd: 0, weightKg: 0, crateType: "none" };
+    }
+
+    function getSkuPriceForClientType(skuCode, clientType) {
+      var s = getSku(skuCode);
+      var t = CLIENT_TYPES.indexOf(clientType) !== -1 ? clientType : "Normal";
+      if (s.pricesByType && typeof s.pricesByType[t] === "number") return Number(s.pricesByType[t]);
+      return Number(s.priceUsd || 0);
+    }
+
+    function getClient(id) {
+      var list = getClients();
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].id === id) return list[i];
+      }
+      return { id: id, name: "Cliente", rif: "", clientType: "Normal", zone: "", creditUsd: 0, creditDays: 0 };
+    }
+
+    function getCrateType(id) {
+      if (id === "none" || id === "" || id === null || id === undefined) return { id: "none", name: "Sin casillero" };
+      var list = getCrateTypes();
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].id === id) return list[i];
+      }
+      return list[0] || { id: "cesta_refresco_24", name: "Cesta Refresco 24x" };
+    }
+
+    function normalizeCrateKey(rawKey) {
+      if (rawKey === "none" || rawKey === "" || rawKey === null || rawKey === undefined) return "none";
+      var list = getCrateTypes();
+      var k = String(rawKey).trim();
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].id === k) return list[i].id;
+      }
+      if (k.indexOf("refresco") !== -1 || k.indexOf("24") !== -1) return "cesta_refresco_24";
+      if (k.indexOf("cerveza") !== -1 || k.indexOf("36") !== -1) return "cesta_cerveza_36";
+      if (k.indexOf("botellon") !== -1 || k.indexOf("garrafon") !== -1) return "botellon_garrafon";
+      return list[0] ? list[0].id : "cesta_refresco_24";
+    }
+
+    function fmtUsd(n) { return "$" + Number(n || 0).toFixed(2); }
+    function fmtBs(usd) { return "Bs. " + (Number(usd || 0) * Number(state.rateBs || 48.5)).toFixed(4); }
+    function fmtRawBs(bs) { return "Bs. " + Number(bs || 0).toFixed(4); }
+
+    function esc(s) {
+      return String(s == null ? "" : s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function setNotice(type, text) {
+      state.notice = { type: type, text: text };
+      saveState();
+    }
+
+    function openModal(html) {
+      var box = document.getElementById("modal-content");
+      var wrap = document.getElementById("modal-backdrop");
+      if (box && wrap) {
+        box.innerHTML = html;
+        wrap.classList.add("open");
+      }
+    }
+
+    function closeModal() {
+      var wrap = document.getElementById("modal-backdrop");
+      if (wrap) wrap.classList.remove("open");
+    }
+    window.closeModal = closeModal;
+
+    function clientTypeBadgeClass(t) {
+      if (t === "Distribuidor") return "b-ok";
+      if (t === "Mayorista") return "b-info";
+      return "b-warn";
+    }
+
+    function formatClientCratesSummary(d) {
+      return getCrateTypes().map(function (ct) {
+        return esc(ct.name) + ": <strong>" + Number(d[ct.id] || 0) + "</strong>";
+      }).join(" · ");
+    }
+
+    function getSkuFefoStock(skuCode) {
+      var sum = 0;
+      for (var i = 0; i < state.lots.length; i++) {
+        if (state.lots[i].sku === skuCode) sum += Number(state.lots[i].qty || 0);
+      }
+      return sum;
+    }
+
+    function getTotalMercanciaCostoUsd() {
+      var list = getSkus();
+      var total = 0;
+      for (var i = 0; i < list.length; i++) {
+        total += getSkuFefoStock(list[i].sku) * Number(list[i].costUsd || 0);
+      }
+      return Number(total.toFixed(2));
+    }
+
+    function allocateFefo(skuCode, neededQty) {
+      var matching = state.lots
+        .filter(function (l) { return l.sku === skuCode && Number(l.qty) > 0; })
+        .sort(function (a, b) { return String(a.expiry).localeCompare(String(b.expiry)); });
+      var totalAvail = matching.reduce(function (acc, l) { return acc + Number(l.qty); }, 0);
+      if (totalAvail < neededQty) {
+        return { ok: false, error: "Stock FEFO insuficiente para " + skuCode + " (disponible: " + totalAvail + ", solicitado: " + neededQty + ")." };
+      }
+      var rem = neededQty;
+      var allocs = [];
+      for (var i = 0; i < matching.length && rem > 0; i++) {
+        var lot = matching[i];
+        var take = Math.min(Number(lot.qty), rem);
+        lot.qty = Number(lot.qty) - take;
+        rem -= take;
+        allocs.push({ lotId: lot.id, expiry: lot.expiry, qty: take });
+      }
+      return { ok: true, allocations: allocs };
+    }
+
+    function returnToFefo(skuCode, qty, preferredLotId, expiryFallback) {
+      if (qty <= 0) return;
+      if (preferredLotId) {
+        for (var i = 0; i < state.lots.length; i++) {
+          if (state.lots[i].id === preferredLotId) {
+            state.lots[i].qty = Number(state.lots[i].qty || 0) + qty;
+            return;
+          }
+        }
+      }
+      state.lots.push({
+        id: "L-DEV-" + Math.floor(100 + Math.random() * 900),
+        sku: skuCode,
+        qty: qty,
+        expiry: expiryFallback || "2027-03-31",
+        warehouse: "Almacén Principal (Reingreso)"
+      });
+    }
+
+    function ensureClientDebt(clientId) {
+      if (!state.clientCrateDebt || typeof state.clientCrateDebt !== "object") state.clientCrateDebt = {};
+      if (!state.clientCrateDebt[clientId] || typeof state.clientCrateDebt[clientId] !== "object") state.clientCrateDebt[clientId] = {};
+      var cTypes = getCrateTypes();
+      for (var i = 0; i < cTypes.length; i++) {
+        var cid = cTypes[i].id;
+        state.clientCrateDebt[clientId][cid] = Number(state.clientCrateDebt[clientId][cid] || 0);
+      }
+      if (!state.clientBalanceUsd || typeof state.clientBalanceUsd !== "object") state.clientBalanceUsd = {};
+      if (typeof state.clientBalanceUsd[clientId] !== "number" || isNaN(state.clientBalanceUsd[clientId])) {
+        state.clientBalanceUsd[clientId] = 0;
+      }
+    }
+
+    function buildMarginalNote(clientId, delivered, returned) {
+      ensureClientDebt(clientId);
+      var cTypes = getCrateTypes();
+      var parts = [];
+      for (var i = 0; i < cTypes.length; i++) {
+        var ct = cTypes[i];
+        var del = Number(delivered[ct.id] || 0);
+        var ret = Number(returned[ct.id] || 0);
+        var net = del - ret;
+        var debt = Number(state.clientCrateDebt[clientId][ct.id] || 0);
+        if (net > 0) parts.push("+" + net + " " + ct.name + " entregados sin retorno (Saldo total cliente: " + debt + ")");
+        else if (net < 0) parts.push(Math.abs(net) + " " + ct.name + " devueltos neto (Saldo total cliente: " + debt + ")");
+        else if (ret > 0) parts.push(ret + " " + ct.name + " devueltos (Saldo total cliente: " + debt + ")");
+      }
+      if (!parts.length) {
+        var d0 = state.clientCrateDebt[clientId];
+        var sumParts = cTypes.map(function (c) { return c.name + "=" + Number(d0[c.id] || 0); });
+        return "Nota Marginal Retornables: Sin movimiento nuevo. Saldo acumulado cliente: " + sumParts.join(", ") + ".";
+      }
+      return "Nota Marginal Retornables: " + parts.join(" | ") + ".";
+    }
+
+    function getConsolidatedInvoiceIdsSet(excludeConsId) {
+      var used = {};
+      for (var i = 0; i < state.consolidations.length; i++) {
+        if (excludeConsId && state.consolidations[i].id === excludeConsId) continue;
+        var ids = state.consolidations[i].invoiceIds || [];
+        for (var j = 0; j < ids.length; j++) used[ids[j]] = true;
+      }
+      return used;
+    }
+
+    function calcConsSkuTotals(invoiceIds) {
+      var map = {};
+      for (var i = 0; i < invoiceIds.length; i++) {
+        var inv = state.invoices.filter(function (x) { return x.id === invoiceIds[i]; })[0];
+        if (!inv) continue;
+        for (var j = 0; j < inv.items.length; j++) {
+          var it = inv.items[j];
+          var s = getSku(it.sku);
+          if (!map[it.sku]) map[it.sku] = { sku: it.sku, name: s.name, qty: 0, weightKg: 0, totalUsd: 0 };
+          var q = Number(it.qty || 0);
+          map[it.sku].qty += q;
+          map[it.sku].weightKg = Number((map[it.sku].weightKg + q * Number(s.weightKg || 0)).toFixed(2));
+          map[it.sku].totalUsd = Number((map[it.sku].totalUsd + q * Number(it.unitPriceUsd || s.priceUsd || 0)).toFixed(2));
+        }
+      }
+      var arr = [];
+      for (var k in map) if (Object.prototype.hasOwnProperty.call(map, k)) arr.push(map[k]);
+      return {
+        skuTotals: arr,
+        grandUnits: arr.reduce(function (a, b) { return a + b.qty; }, 0),
+        grandWeightKg: Number(arr.reduce(function (a, b) { return a + b.weightKg; }, 0).toFixed(2)),
+        grandUsd: Number(arr.reduce(function (a, b) { return a + b.totalUsd; }, 0).toFixed(2))
+      };
+    }
+
+    function countUniqueClientsForInvoices(invoiceIds) {
+      var seen = {};
+      var count = 0;
+      for (var i = 0; i < (invoiceIds || []).length; i++) {
+        var inv = state.invoices.filter(function (x) { return x.id === invoiceIds[i]; })[0];
+        if (inv && inv.clientId && !seen[inv.clientId]) {
+          seen[inv.clientId] = true;
+          count += 1;
+        }
+      }
+      return count;
+    }
+
+    function computeTopSellingSkus(fromDate, toDate) {
+      var statsMap = {};
+      var allSkus = getSkus();
+      for (var sIdx = 0; sIdx < allSkus.length; sIdx++) {
+        var sk = allSkus[sIdx];
+        statsMap[sk.sku] = { sku: sk.sku, name: sk.name, brand: sk.brand || "General", units: 0, revenueUsd: 0, invoicesCount: 0 };
+      }
+      var totalUnits = 0;
+      var totalRevenueUsd = 0;
+      var matchedInvoices = 0;
+
+      for (var i = 0; i < state.invoices.length; i++) {
+        var inv = state.invoices[i];
+        var d = String(inv.date || "");
+        if (fromDate && d < fromDate) continue;
+        if (toDate && d > toDate) continue;
+        matchedInvoices += 1;
+        var seenInInv = {};
+        for (var j = 0; j < (inv.items || []).length; j++) {
+          var it = inv.items[j];
+          if (!statsMap[it.sku]) {
+            var refSku = getSku(it.sku);
+            statsMap[it.sku] = { sku: it.sku, name: refSku.name, brand: refSku.brand || "General", units: 0, revenueUsd: 0, invoicesCount: 0 };
+          }
+          var q = Number(it.qty || 0);
+          var sub = q * Number(it.unitPriceUsd || getSku(it.sku).priceUsd || 0);
+          statsMap[it.sku].units += q;
+          statsMap[it.sku].revenueUsd = Number((statsMap[it.sku].revenueUsd + sub).toFixed(2));
+          if (!seenInInv[it.sku]) {
+            statsMap[it.sku].invoicesCount += 1;
+            seenInInv[it.sku] = true;
+          }
+          totalUnits += q;
+          totalRevenueUsd = Number((totalRevenueUsd + sub).toFixed(2));
+        }
+      }
+
+      var list = [];
+      for (var key in statsMap) {
+        if (Object.prototype.hasOwnProperty.call(statsMap, key)) {
+          var row = statsMap[key];
+          row.sharePct = totalUnits > 0 ? ((row.units / totalUnits) * 100) : 0;
+          list.push(row);
+        }
+      }
+      list.sort(function (a, b) {
+        if (b.units !== a.units) return b.units - a.units;
+        return b.revenueUsd - a.revenueUsd;
+      });
+
+      return { items: list, totalUnits: totalUnits, totalRevenueUsd: totalRevenueUsd, matchedInvoices: matchedInvoices };
+    }
+
+    function openClientFormModal(existingClient, onSaved) {
+      var isEdit = !!existingClient;
+      var c = existingClient || { id: "", name: "", rif: "", clientType: "Normal", zone: "Ruta Centro", creditUsd: 1000, creditDays: 15, phone: "", email: "", address: "" };
+      var typeOpts = CLIENT_TYPES.map(function (t) {
+        return '<option value="' + esc(t) + '"' + (c.clientType === t ? " selected" : "") + '>' + esc(t) + '</option>';
+      }).join("");
+
+      openModal(
+        '<div class="card-header"><div><h3 class="card-title">' + (isEdit ? "Modificar Cliente — " + esc(c.name) : "Agregar Nuevo Cliente") + '</h3><p class="muted">Configure los datos del cliente y su escala de precios (Normal - Mayorista - Distribuidor).</p></div><button type="button" class="sm" onclick="closeModal()">Cerrar</button></div>' +
+        '<div class="grid-2"><div class="field"><label>Nombre / Razón Social *</label><input type="text" id="cf-name" value="' + esc(c.name) + '" placeholder="Ej. Bodegón La Paz C.A." /></div><div class="field"><label>RIF / Documento *</label><input type="text" id="cf-rif" value="' + esc(c.rif) + '" placeholder="Ej. J-41298500-9" /></div></div>' +
+        '<div class="grid-4">' +
+          '<div class="field"><label>Tipo de Cliente (Precio) *</label><select id="cf-type">' + typeOpts + '</select></div>' +
+          '<div class="field"><label>Ruta / Zona *</label><select id="cf-zone"><option value="Ruta Centro"' + (c.zone === "Ruta Centro" ? " selected" : "") + '>Ruta Centro</option><option value="Ruta Norte"' + (c.zone === "Ruta Norte" ? " selected" : "") + '>Ruta Norte</option><option value="Ruta Sur / Lago"' + (c.zone === "Ruta Sur / Lago" ? " selected" : "") + '>Ruta Sur / Lago</option><option value="Occidente / Zulia"' + (c.zone === "Occidente / Zulia" ? " selected" : "") + '>Occidente / Zulia</option></select></div>' +
+          '<div class="field"><label>Límite de Crédito ($)</label><input type="number" step="0.01" min="0" id="cf-credit" value="' + esc(c.creditUsd != null ? c.creditUsd : 1000) + '" /></div>' +
+          '<div class="field"><label>Días de Crédito *</label><input type="number" step="1" min="0" id="cf-days" value="' + esc(c.creditDays != null ? c.creditDays : 15) + '" /></div>' +
+        '</div>' +
+        '<div class="grid-2"><div class="field"><label>Teléfono / WhatsApp *</label><input type="text" id="cf-phone" value="' + esc(c.phone || "") + '" placeholder="Ej. 0414-0001122" /></div><div class="field"><label>Correo Electrónico</label><input type="email" id="cf-email" value="' + esc(c.email || "") + '" placeholder="Ej. compras@cliente.com" /></div></div>' +
+        '<div class="field"><label>Dirección Completa / Punto de Referencia *</label><input type="text" id="cf-address" value="' + esc(c.address || "") + '" placeholder="Ej. Av. 16 Guajira, frente a estación de servicio" /></div>' +
+        '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;"><button type="button" class="sm" onclick="closeModal()">Cancelar</button><button type="button" class="success sm" id="btn-save-client-form">' + (isEdit ? "Guardar Cambios" : "Guardar Cliente") + '</button></div>'
+      );
+
+      document.getElementById("btn-save-client-form").onclick = function () {
+        var nameVal = document.getElementById("cf-name").value.trim();
+        var rifVal = document.getElementById("cf-rif").value.trim();
+        var typeVal = document.getElementById("cf-type").value;
+        var zoneVal = document.getElementById("cf-zone").value;
+        var creditVal = Math.max(0, parseFloat(document.getElementById("cf-credit").value) || 0);
+        var creditDaysVal = Math.max(0, parseInt(document.getElementById("cf-days").value, 10) || 0);
+        var phoneVal = document.getElementById("cf-phone").value.trim();
+        var emailVal = document.getElementById("cf-email").value.trim();
+        var addrVal = document.getElementById("cf-address").value.trim();
+
+        if (!nameVal || !rifVal || !phoneVal || !addrVal) {
+          setNotice("bad", "Complete al menos Nombre/Razón Social, RIF, Teléfono y Dirección del cliente.");
+          closeModal();
+          render();
+          return;
+        }
+
+        if (isEdit) {
+          c.name = nameVal; c.rif = rifVal; c.clientType = typeVal; c.zone = zoneVal;
+          c.creditUsd = Number(creditVal.toFixed(2)); c.creditDays = creditDaysVal;
+          c.phone = phoneVal; c.email = emailVal; c.address = addrVal;
+          closeModal();
+          setNotice("ok", "Cliente '" + c.name + "' actualizado (Tipo: " + c.clientType + " · " + c.creditDays + " días de crédito).");
+          saveState();
+          if (typeof onSaved === "function") onSaved(c);
+          render();
+          return;
+        }
+
+        var newId = "c" + (getClients().length + 1) + "_" + Math.floor(100 + Math.random() * 900);
+        var created = {
+          id: newId, name: nameVal, rif: rifVal, clientType: typeVal, zone: zoneVal,
+          creditUsd: Number(creditVal.toFixed(2)), creditDays: creditDaysVal,
+          phone: phoneVal, email: emailVal, address: addrVal
+        };
+        state.clients.push(created);
+        ensureClientDebt(newId);
+        closeModal();
+        setNotice("ok", "Cliente '" + created.name + "' (" + created.clientType + ") registrado con " + created.creditDays + " días de crédito.");
+        saveState();
+        if (typeof onSaved === "function") onSaved(created);
+        render();
+      };
+    }
+
+    function openNewClientModal(onCreated) { openClientFormModal(null, onCreated); }
+    function openEditClientModal(clientId, onUpdated) {
+      var target = getClient(clientId);
+      if (target && target.id) openClientFormModal(target, onUpdated);
+    }
+
+    function getUserAllowedTabs(u) {
+      var perms = Array.isArray(u && u.perms) ? u.perms : (ROLE_PERMS[u && u.role] || ["ventas"]);
+      return perms.filter(function (k) { return !!MENU_MODULES[k]; });
+    }
+
+    function activateUserSession(targetUser, showWelcome) {
+      if (!targetUser) return;
+      if (targetUser.active === false) {
+        setNotice("bad", "El usuario '" + targetUser.name + "' está inactivo.");
+        render();
+        return;
+      }
+      state.currentUserId = targetUser.id;
+      state.isLoggedIn = true;
+      var allowedTabs = getUserAllowedTabs(targetUser);
+      if (!allowedTabs.length) allowedTabs = ["ventas"];
+      if (allowedTabs.indexOf(state.activeTab) === -1) {
+        state.activeTab = allowedTabs.indexOf("ventas") !== -1 ? "ventas" : allowedTabs[0];
+      }
+      setNotice("ok", (showWelcome ? "Bienvenido, " : "Perfil cambiado a ") + targetUser.name + " (" + targetUser.role + ").");
+      saveState();
+      render();
+    }
+
+    function findUserByIdentifier(identifier) {
+      var needle = String(identifier || "").trim().toLowerCase();
+      if (!needle) return null;
+      var list = getUsers();
+      for (var i = 0; i < list.length; i++) {
+        var u = list[i];
+        var uName = String(u.name || "").trim().toLowerCase();
+        var uEmail = String(u.email || "").trim().toLowerCase();
+        if (uName === needle || (uEmail && uEmail === needle)) {
+          return u;
+        }
+      }
+      return null;
+    }
+
+    function renderTopbar() {
+      var comp = getCompany();
+      var logoEl = document.getElementById("topbar-logo");
+      var nameEl = document.getElementById("topbar-company-name");
+      var subEl = document.getElementById("topbar-company-sub");
+
+      if (logoEl) {
+        if (comp.logoDataUrl) logoEl.innerHTML = '<img src="' + esc(comp.logoDataUrl) + '" alt="' + esc(comp.name) + '" />';
+        else logoEl.textContent = getCompanyInitials(comp.name);
+      }
+      if (nameEl) nameEl.textContent = comp.name || "DistriFood ERP";
+      if (subEl) {
+        var bits = ["Operación de Campo · FEFO · Retornables · Ruta y Despacho"];
+        if (comp.phones) bits.push("Tel: " + comp.phones);
+        if (comp.address) bits.push(comp.address);
+        subEl.textContent = bits.join(" · ");
+      }
+
+      var el = document.getElementById("topbar-session");
+      if (!el) return;
+      if (!state.isLoggedIn) {
+        el.innerHTML = "";
+        return;
+      }
+
+      var u = getUser();
+      var initialCloudLabel = cloudSyncStatus === "synced"
+        ? "Nube: Sincronizado"
+        : (cloudSyncStatus === "syncing"
+          ? "Nube: Guardando..."
+          : (cloudSyncStatus === "offline"
+            ? "Nube: Local / Sin red"
+            : (hasSupabaseConfig() ? "Nube: Conectando..." : "Nube: Local")));
+
+      el.innerHTML =
+        '<span class="pill pill-ok">Sesión activa: ' + esc(u.name) + ' · ' + esc(u.role) + '</span>' +
+        '<span class="pill" id="pill-cloud-status">' + esc(initialCloudLabel) + '</span>' +
+        '<label class="pill">Tasa Bs/$: <input id="inp-rate" type="number" step="0.0001" min="0.0001" value="' + esc(Number(state.rateBs || 48.5).toFixed(4)) + '" /></label>' +
+        '<button type="button" class="sm" id="btn-toggle-session">Cambiar / Salir</button>' +
+        '<button type="button" class="sm" id="btn-reset-demo">Reiniciar Demo</button>';
+
+      document.getElementById("inp-rate").onchange = function () {
+        var val = parseFloat(this.value);
+        if (!isNaN(val) && val > 0) {
+          var savedRate = recordDailyRate(getTodayIsoDate(), val, getUser() && getUser().name);
+          setNotice("ok", "Tasa del día (" + savedRate.date + ") guardada en Bs. " + savedRate.rateBs.toFixed(4) + " por $.");
+          saveState();
+          render();
+        }
+      };
+
+      document.getElementById("btn-toggle-session").onclick = function () {
+        state.isLoggedIn = false;
+        saveState();
+        render();
+      };
+
+      document.getElementById("btn-reset-demo").onclick = function () {
+        delStore(STORAGE_KEY);
+        state = defaultState();
+        if (window.DistriFoodERP) window.DistriFoodERP.state = state;
+        setNotice("ok", "Datos de demostración restablecidos.");
+        pushCloudStateNow();
+        render();
+      };
+    }
+
+    function renderNav() {
+      var nav = document.getElementById("main-nav");
+      if (!nav) return;
+      if (!state.isLoggedIn) {
+        nav.innerHTML = '<span class="muted">Inicie sesión para operar en los módulos de DistriFood ERP.</span>';
+        return;
+      }
+
+      var tabs = [
+        { id: "ventas", label: "Facturar y Ver Ventas", perm: "ventas" },
+        { id: "clientes", label: "Clientes", perm: "clientes" },
+        { id: "despacho", label: "Despacho y Devoluciones", perm: "despacho" },
+        { id: "consolidado", label: "Consolidado de Carga", perm: "consolidado" },
+        { id: "compras", label: "Compras Multi-SKU", perm: "compras" },
+        { id: "almacen", label: "Almacén / FEFO", perm: "almacen" },
+        { id: "retornables", label: "Retornables y Cobranza", perm: "retornables" },
+        { id: "visitas", label: "Visitas y Encuestas", perm: "visitas" },
+        { id: "reportes", label: "Reportes", perm: "reportes" },
+        { id: "administracion", label: "Administración", perm: "administracion" }
+      ];
+
+      var allowedTabs = tabs.filter(function (t) { return hasPerm(t.perm); });
+      if (!allowedTabs.length) {
+        nav.innerHTML = '<span class="muted">No hay módulos asignados a este usuario.</span>';
+        return;
+      }
+
+      if (allowedTabs.map(function (t) { return t.id; }).indexOf(state.activeTab) === -1) {
+        state.activeTab = allowedTabs[0].id;
+      }
+
+      nav.innerHTML = allowedTabs.map(function (t) {
+        return '<button type="button" class="nav-btn' + (state.activeTab === t.id ? " active" : "") + '" data-tab="' + t.id + '">' + esc(t.label) + '</button>';
+      }).join("");
+
+      var btns = nav.querySelectorAll("button[data-tab]");
+      for (var i = 0; i < btns.length; i++) {
+        btns[i].onclick = function () {
+          var id = this.getAttribute("data-tab");
+          state.activeTab = id;
+          state.notice = null;
+          saveState();
+          render();
+        };
+      }
+    }
+
+    function renderNotice() {
+      var el = document.getElementById("global-notice");
+      if (!el) return;
+      if (!state.notice) { el.innerHTML = ""; return; }
+      var cls = state.notice.type === "ok" ? "notice-ok" : (state.notice.type === "warn" ? "notice-warn" : (state.notice.type === "bad" ? "notice-bad" : "notice-info"));
+      el.innerHTML = '<div class="notice ' + cls + '">' + esc(state.notice.text) + '</div>';
+    }
+
+    function renderLoginView(root) {
+      root.innerHTML =
+        '<div class="card" style="max-width:460px;margin:16px auto;">' +
+          '<h2 class="card-title">Iniciar Sesión — ' + esc(getCompany().name || "DistriFood ERP") + '</h2>' +
+          '<p class="muted">Ingrese su nombre de usuario o correo electrónico y su clave de acceso.</p>' +
+          '<div class="field"><label>Nombre de Usuario o Correo *</label><input type="text" id="login-identifier" placeholder="Ej. Carlos Admin o admin@distrifood.com" autocomplete="username" /></div>' +
+          '<div class="field"><label>Clave de Acceso *</label><input type="password" id="login-password" placeholder="Ingrese su clave" autocomplete="current-password" /></div>' +
+          '<div id="login-form-error" class="muted" style="color:var(--bad);margin-top:-4px;margin-bottom:8px;"></div>' +
+          '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">' +
+            '<button type="button" class="primary" style="width:100%;" id="btn-do-login">Iniciar Sesión</button>' +
+          '</div>' +
+        '</div>';
+
+      var idInp = document.getElementById("login-identifier");
+      var passInp = document.getElementById("login-password");
+      var errEl = document.getElementById("login-form-error");
+      if (idInp) idInp.focus();
+
+      function submitLogin() {
+        var identVal = idInp ? idInp.value : "";
+        var passVal = passInp ? String(passInp.value || "") : "";
+        var matched = findUserByIdentifier(identVal);
+
+        if (!matched) {
+          if (errEl) errEl.textContent = "Usuario o correo no encontrado.";
+          if (idInp) idInp.focus();
+          return;
+        }
+        if (matched.active === false) {
+          if (errEl) errEl.textContent = "El usuario '" + matched.name + "' está inactivo.";
+          return;
+        }
+        var expectedPass = String(matched.password != null ? matched.password : "1234");
+        if (passVal !== expectedPass) {
+          if (errEl) errEl.textContent = "Clave incorrecta.";
+          if (passInp) { passInp.value = ""; passInp.focus(); }
+          return;
+        }
+        activateUserSession(matched, true);
+      }
+
+      document.getElementById("btn-do-login").onclick = submitLogin;
+      if (idInp) {
+        idInp.onkeydown = function (ev) {
+          if (ev.key === "Enter") { ev.preventDefault(); submitLogin(); }
+        };
+      }
+      if (passInp) {
+        passInp.onkeydown = function (ev) {
+          if (ev.key === "Enter") { ev.preventDefault(); submitLogin(); }
+        };
+      }
+    }
+
+    function safeRun(fn, root) {
+      try {
+        fn(root);
+      } catch (err) {
+        if (root) {
+          root.innerHTML = '<div class="card"><h2 class="card-title">Error en el módulo actual</h2><p class="muted">' + esc(err && err.message ? err.message : String(err)) + '</p><button type="button" class="primary sm" id="btn-recover-view">Restablecer Datos Demo</button></div>';
+          var rec = document.getElementById("btn-recover-view");
+          if (rec) rec.onclick = function () { delStore(STORAGE_KEY); state = defaultState(); render(); };
+        }
+      }
+    }
+
+    function render() {
+      try { renderTopbar(); } catch (e) {}
+      try { renderNav(); } catch (e) {}
+      try { renderNotice(); } catch (e) {}
+
+      var root = document.getElementById("app-root");
+      if (!root) return;
+
+      if (!state.isLoggedIn) {
+        safeRun(renderLoginView, root);
+        return;
+      }
+
+      var allowedTabs = getUserAllowedTabs(getUser());
+      if (allowedTabs.indexOf(state.activeTab) === -1) {
+        state.activeTab = allowedTabs[0] || "ventas";
+      }
+
+      var activeModule = MENU_MODULES[state.activeTab] || MENU_MODULES.ventas;
+      safeRun(activeModule, root);
+    }
+
+    function syncFromCloud(forceRender) {
+      if (!hasSupabaseConfig()) {
+        setCloudStatus("local");
+        if (forceRender) render();
+        return;
+      }
+      fetchCloudState().then(function (remoteObj) {
+        if (!remoteObj) {
+          pushCloudStateNow();
+          if (forceRender) render();
+          return;
+        }
+        isApplyingRemoteState = true;
+        state = normalizeLoadedState(remoteObj);
+        setStore(STORAGE_KEY, JSON.stringify(state));
+        if (window.DistriFoodERP) window.DistriFoodERP.state = state;
+        isApplyingRemoteState = false;
+        setCloudStatus("synced");
+        render();
+      });
+    }
+
+    function bootApp() {
+      render();
+      syncFromCloud(false);
+    }
+
+    window.DistriFoodERP = {
+      state: state,
+      ALL_PERMS: ALL_PERMS,
+      ROLE_PERMS: ROLE_PERMS,
+      DEFAULT_CRATE_TYPES: DEFAULT_CRATE_TYPES,
+      registerMenuModule: registerMenuModule,
+      saveState: saveState,
+      render: render,
+      setNotice: setNotice,
+      openModal: openModal,
+      closeModal: closeModal,
+      esc: esc,
+      fmtUsd: fmtUsd,
+      fmtBs: fmtBs,
+      fmtRawBs: fmtRawBs,
+      getTodayIsoDate: getTodayIsoDate,
+      normalizeRateHistory: normalizeRateHistory,
+      recordDailyRate: recordDailyRate,
+      deleteRateHistoryEntry: deleteRateHistoryEntry,
+      getCompany: getCompany,
+      getCompanyInitials: getCompanyInitials,
+      getUsers: getUsers,
+      getUser: getUser,
+      hasPerm: hasPerm,
+      getSkus: getSkus,
+      getSku: getSku,
+      getSkuPriceForClientType: getSkuPriceForClientType,
+      getSkuFefoStock: getSkuFefoStock,
+      getTotalMercanciaCostoUsd: getTotalMercanciaCostoUsd,
+      getClients: getClients,
+      getClient: getClient,
+      clientTypeBadgeClass: clientTypeBadgeClass,
+      ensureClientDebt: ensureClientDebt,
+      formatClientCratesSummary: formatClientCratesSummary,
+      getCrateTypes: getCrateTypes,
+      getCrateType: getCrateType,
+      normalizeCrateKey: normalizeCrateKey,
+      getPresets: getPresets,
+      addPresetValue: addPresetValue,
+      openAddPresetModal: openAddPresetModal,
+      openEditPresetModal: openEditPresetModal,
+      handleDeletePreset: handleDeletePreset,
+      openNewClientModal: openNewClientModal,
+      openEditClientModal: openEditClientModal,
+      allocateFefo: allocateFefo,
+      returnToFefo: returnToFefo,
+      buildMarginalNote: buildMarginalNote,
+      getConsolidatedInvoiceIdsSet: getConsolidatedInvoiceIdsSet,
+      calcConsSkuTotals: calcConsSkuTotals,
+      countUniqueClientsForInvoices: countUniqueClientsForInvoices,
+      computeTopSellingSkus: computeTopSellingSkus,
+      syncFromCloud: syncFromCloud
+    };
+
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible") {
+        syncFromCloud(false);
+      }
+    });
+
+    document.addEventListener("DOMContentLoaded", bootApp);
+    if (document.readyState === "complete" || document.readyState === "interactive") {
+      setTimeout(bootApp, 0);
+    }
+  })();
+  </script>
+
+  <script src="modules/ventas.js"></script>
+  <script src="modules/clientes.js"></script>
+  <script src="modules/despacho.js"></script>
+  <script src="modules/consolidado.js"></script>
+  <script src="modules/compras.js"></script>
+  <script src="modules/almacen.js"></script>
+  <script src="modules/retornables.js"></script>
+  <script src="modules/visitas.js"></script>
+  <script src="modules/reportes.js"></script>
+  <script src="modules/administracion.js"></script>
+</body>
+</html>
