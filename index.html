@@ -369,7 +369,7 @@
     <div id="app-root">
       <div class="card">
         <h2 class="card-title">Cargando DistriFood ERP...</h2>
-        <p class="muted">Inicializando sesión, lotes FEFO, retornables y módulos operativos.</p>
+        <p class="muted">Inicializando sesión SQL en vivo, lotes FEFO, retornables y módulos operativos.</p>
       </div>
     </div>
   </main>
@@ -386,8 +386,9 @@
     var STORAGE_KEY = "distrifood_erp_v19_state";
     var SUPABASE_URL = "https://hanamjgoztionetdttsi.supabase.co";
     var SUPABASE_PUBLISHABLE_KEY = "sb_publishable_1MVs4iqFLbztVBARt1waag_Sxj3ooJJ";
-    var SUPABASE_ROW_ID = "xaherca2023_main";
     var supabaseClient = null;
+    var realtimeChannel = null;
+    var realtimeRefreshTimer = null;
 
     var mem = {};
     var MENU_MODULES = {};
@@ -423,40 +424,199 @@
       var pill = document.getElementById("pill-cloud-status");
       if (!pill) return;
       if (nextStatus === "synced") {
-        pill.textContent = "Nube: Sincronizado";
+        pill.textContent = "SQL En Vivo: Sincronizado";
       } else if (nextStatus === "syncing") {
-        pill.textContent = "Nube: Guardando...";
+        pill.textContent = "SQL En Vivo: Guardando...";
       } else if (nextStatus === "offline") {
-        pill.textContent = "Nube: Local / Sin red";
+        pill.textContent = "SQL En Vivo: Local / Sin red";
       } else {
-        pill.textContent = "Nube: Local";
+        pill.textContent = "SQL En Vivo: Local";
       }
     }
 
-    function fetchCloudState() {
+    function fetchSqlTablesSnapshot() {
       var client = getSupabaseClient();
       if (!client) {
         setCloudStatus("offline");
         return Promise.resolve(null);
       }
 
-      return client
-        .from("erp_state")
-        .select("state_json,updated_at")
-        .eq("id", SUPABASE_ROW_ID)
-        .maybeSingle()
-        .then(function (res) {
-          if (res.error) throw res.error;
-          return res.data && res.data.state_json ? res.data.state_json : null;
-        })
-        .catch(function (err) {
-          console.error("Error leyendo erp_state en Supabase:", err);
-          setCloudStatus("offline");
-          return null;
+      return Promise.all([
+        client.from("clients").select("*").order("id", { ascending: true }),
+        client.from("skus").select("*").order("sku", { ascending: true }),
+        client.from("lots").select("*").order("expiry", { ascending: true }),
+        client.from("invoices").select("*").order("date", { ascending: false }),
+        client.from("invoice_items").select("*").order("id", { ascending: true }),
+        client.from("visits").select("*").order("date", { ascending: false }),
+        client.from("consolidations").select("*").order("date", { ascending: false }),
+        client.from("purchases").select("*").order("date", { ascending: false }),
+        client.from("collections").select("*").order("date", { ascending: false }),
+        client.from("app_settings").select("*").eq("id", "main").maybeSingle()
+      ]).then(function (results) {
+        for (var i = 0; i < results.length; i++) {
+          if (results[i].error) throw results[i].error;
+        }
+
+        var clientRows = results[0].data || [];
+        var skuRows = results[1].data || [];
+        var lotRows = results[2].data || [];
+        var invoiceRows = results[3].data || [];
+        var itemRows = results[4].data || [];
+        var visitRows = results[5].data || [];
+        var consRows = results[6].data || [];
+        var purchaseRows = results[7].data || [];
+        var collectionRows = results[8].data || [];
+        var settingsRow = results[9].data || null;
+
+        var itemsByInvoice = {};
+        for (var k = 0; k < itemRows.length; k++) {
+          var ir = itemRows[k];
+          if (!itemsByInvoice[ir.invoice_id]) itemsByInvoice[ir.invoice_id] = [];
+          itemsByInvoice[ir.invoice_id].push({
+            sku: ir.sku,
+            qty: Number(ir.qty || 0),
+            unitPriceUsd: Number(ir.unit_price_usd || 0),
+            lotAllocations: Array.isArray(ir.lot_allocations) ? ir.lot_allocations : []
+          });
+        }
+
+        var clientBalanceUsd = {};
+        var clientCrateDebt = {};
+        var clientsMapped = clientRows.map(function (c) {
+          clientBalanceUsd[c.id] = Number(c.balance_usd || 0);
+          clientCrateDebt[c.id] = c.crate_debt && typeof c.crate_debt === "object" ? c.crate_debt : {};
+          return {
+            id: c.id,
+            name: c.name,
+            rif: c.rif || "",
+            clientType: c.client_type || "Normal",
+            zone: c.zone || "Ruta Centro",
+            creditUsd: Number(c.credit_usd || 0),
+            creditDays: Number(c.credit_days || 0),
+            phone: c.phone || "",
+            email: c.email || "",
+            address: c.address || ""
+          };
         });
+
+        var skusMapped = skuRows.map(function (s) {
+          var basePrice = Number(s.price_usd || 0);
+          var pByType = Object.assign(
+            { Normal: basePrice, Mayorista: basePrice, Distribuidor: basePrice },
+            s.prices_by_type && typeof s.prices_by_type === "object" ? s.prices_by_type : {}
+          );
+          return {
+            sku: s.sku,
+            name: s.name,
+            brand: s.brand || "",
+            priceUsd: basePrice,
+            pricesByType: pByType,
+            costUsd: Number(s.cost_usd || 0),
+            weightKg: Number(s.weight_kg || 0),
+            crateType: s.crate_type || "none"
+          };
+        });
+
+        var lotsMapped = lotRows.map(function (l) {
+          return {
+            id: l.id,
+            sku: l.sku,
+            qty: Number(l.qty || 0),
+            expiry: l.expiry,
+            warehouse: l.warehouse || "Almacén Principal"
+          };
+        });
+
+        var invoicesMapped = invoiceRows.map(function (inv) {
+          return {
+            id: inv.id,
+            date: inv.date,
+            clientId: inv.client_id,
+            sellerName: inv.seller_name || "",
+            status: inv.status || "En Despacho",
+            items: itemsByInvoice[inv.id] || [],
+            cratesDelivered: inv.crates_delivered && typeof inv.crates_delivered === "object" ? inv.crates_delivered : {},
+            cratesReturned: inv.crates_returned && typeof inv.crates_returned === "object" ? inv.crates_returned : {},
+            marginalNote: inv.marginal_note || "",
+            totalUsd: Number(inv.total_usd || 0),
+            returnsLog: Array.isArray(inv.returns_log) ? inv.returns_log : []
+          };
+        });
+
+        var visitsMapped = visitRows.map(function (v) {
+          return {
+            id: v.id,
+            date: v.date,
+            clientId: v.client_id,
+            userName: v.user_name || "",
+            exhibicionOk: v.exhibicion_ok || "",
+            stockOut: v.stock_out || "No",
+            surveyScore: Number(v.survey_score || 5),
+            notes: v.notes || ""
+          };
+        });
+
+        var consMapped = consRows.map(function (co) {
+          return {
+            id: co.id,
+            date: co.date,
+            truck: co.truck || "",
+            driver: co.driver || "",
+            routeZone: co.route_zone || "",
+            invoiceIds: Array.isArray(co.invoice_ids) ? co.invoice_ids : [],
+            skuTotals: Array.isArray(co.sku_totals) ? co.sku_totals : [],
+            grandUnits: Number(co.grand_units || 0),
+            grandWeightKg: Number(co.grand_weight_kg || 0),
+            grandUsd: Number(co.grand_usd || 0)
+          };
+        });
+
+        var purchasesMapped = purchaseRows.map(function (p) {
+          return {
+            id: p.id,
+            date: p.date,
+            supplier: p.supplier || "",
+            lines: Array.isArray(p.lines) ? p.lines : [],
+            totalUsd: Number(p.total_usd || 0)
+          };
+        });
+
+        var collectionLogMapped = collectionRows.map(function (col) {
+          return {
+            id: col.id,
+            date: col.date,
+            clientId: col.client_id,
+            amountUsd: Number(col.amount_usd || 0),
+            rateBs: col.rate_bs != null ? Number(col.rate_bs) : null,
+            method: col.method || "",
+            notes: col.notes || "",
+            userName: col.user_name || ""
+          };
+        });
+
+        return Object.assign({}, state, {
+          clients: clientsMapped.length ? clientsMapped : state.clients,
+          skus: skusMapped.length ? skusMapped : state.skus,
+          lots: lotsMapped,
+          invoices: invoicesMapped,
+          visits: visitsMapped,
+          consolidations: consMapped,
+          purchases: purchasesMapped,
+          collectionLog: collectionLogMapped,
+          clientBalanceUsd: clientBalanceUsd,
+          clientCrateDebt: clientCrateDebt,
+          rateBs: settingsRow && settingsRow.rate_bs != null ? Number(settingsRow.rate_bs) : state.rateBs,
+          rateHistory: settingsRow && Array.isArray(settingsRow.rate_history) ? settingsRow.rate_history : state.rateHistory,
+          crateStock: settingsRow && settingsRow.crate_stock && typeof settingsRow.crate_stock === "object" ? settingsRow.crate_stock : state.crateStock
+        });
+      }).catch(function (err) {
+        console.error("Error leyendo tablas SQL en Supabase:", err);
+        setCloudStatus("offline");
+        return null;
+      });
     }
 
-    function pushCloudStateNow() {
+    function pushSqlTablesNow() {
       var client = getSupabaseClient();
       if (!client) {
         setCloudStatus("offline");
@@ -464,23 +624,171 @@
       }
       setCloudStatus("syncing");
 
-      return client
-        .from("erp_state")
-        .upsert(
-          {
-            id: SUPABASE_ROW_ID,
-            state_json: state,
-            updated_at: new Date().toISOString()
-          },
-          { onConflict: "id" }
-        )
-        .then(function (res) {
-          if (res.error) throw res.error;
+      var clientPayload = (state.clients || []).map(function (c) {
+        ensureClientDebt(c.id);
+        return {
+          id: c.id,
+          name: c.name,
+          rif: c.rif || null,
+          client_type: c.clientType || "Normal",
+          zone: c.zone || null,
+          credit_usd: Number(c.creditUsd || 0),
+          credit_days: Number(c.creditDays || 0),
+          phone: c.phone || null,
+          email: c.email || null,
+          address: c.address || null,
+          balance_usd: Number((state.clientBalanceUsd && state.clientBalanceUsd[c.id]) || 0),
+          crate_debt: (state.clientCrateDebt && state.clientCrateDebt[c.id]) || {},
+          updated_at: new Date().toISOString()
+        };
+      });
+
+      var skuPayload = (state.skus || []).map(function (s) {
+        return {
+          sku: s.sku,
+          name: s.name,
+          brand: s.brand || null,
+          price_usd: Number(s.priceUsd || 0),
+          prices_by_type: s.pricesByType || {},
+          cost_usd: Number(s.costUsd || 0),
+          weight_kg: Number(s.weightKg || 0),
+          crate_type: s.crateType || "none",
+          updated_at: new Date().toISOString()
+        };
+      });
+
+      var lotPayload = (state.lots || []).map(function (l) {
+        return {
+          id: l.id,
+          sku: l.sku,
+          qty: Number(l.qty || 0),
+          expiry: l.expiry,
+          warehouse: l.warehouse || "Almacén Principal",
+          updated_at: new Date().toISOString()
+        };
+      });
+
+      var invoicePayload = (state.invoices || []).map(function (inv) {
+        return {
+          id: inv.id,
+          date: inv.date,
+          client_id: inv.clientId,
+          seller_name: inv.sellerName || null,
+          status: inv.status || "En Despacho",
+          crates_delivered: inv.cratesDelivered || {},
+          crates_returned: inv.cratesReturned || {},
+          marginal_note: inv.marginalNote || null,
+          total_usd: Number(inv.totalUsd || 0),
+          returns_log: Array.isArray(inv.returnsLog) ? inv.returnsLog : [],
+          updated_at: new Date().toISOString()
+        };
+      });
+
+      var invoiceItemsPayload = [];
+      (state.invoices || []).forEach(function (inv) {
+        (inv.items || []).forEach(function (it) {
+          invoiceItemsPayload.push({
+            invoice_id: inv.id,
+            sku: it.sku,
+            qty: Number(it.qty || 0),
+            unit_price_usd: Number(it.unitPriceUsd || 0),
+            lot_allocations: Array.isArray(it.lotAllocations) ? it.lotAllocations : []
+          });
+        });
+      });
+
+      var visitPayload = (state.visits || []).map(function (v) {
+        return {
+          id: v.id,
+          date: v.date,
+          client_id: v.clientId,
+          user_name: v.userName || null,
+          exhibicion_ok: v.exhibicionOk || null,
+          stock_out: v.stockOut || null,
+          survey_score: Number(v.surveyScore || 5),
+          notes: v.notes || null
+        };
+      });
+
+      var consPayload = (state.consolidations || []).map(function (co) {
+        return {
+          id: co.id,
+          date: co.date,
+          truck: co.truck || null,
+          driver: co.driver || null,
+          route_zone: co.routeZone || null,
+          invoice_ids: Array.isArray(co.invoiceIds) ? co.invoiceIds : [],
+          sku_totals: Array.isArray(co.skuTotals) ? co.sku_totals : [],
+          grand_units: Number(co.grandUnits || 0),
+          grand_weight_kg: Number(co.grandWeightKg || 0),
+          grand_usd: Number(co.grandUsd || 0)
+        };
+      });
+
+      var purchasePayload = (state.purchases || []).map(function (p) {
+        return {
+          id: p.id,
+          date: p.date,
+          supplier: p.supplier || "Proveedor",
+          lines: Array.isArray(p.lines) ? p.lines : [],
+          total_usd: Number(p.totalUsd || 0)
+        };
+      });
+
+      var collectionPayload = (state.collectionLog || []).map(function (col) {
+        return {
+          id: col.id,
+          date: col.date,
+          client_id: col.clientId,
+          amount_usd: Number(col.amountUsd || 0),
+          rate_bs: col.rateBs != null ? Number(col.rateBs) : null,
+          method: col.method || null,
+          notes: col.notes || null,
+          user_name: col.userName || null
+        };
+      });
+
+      var settingsPayload = {
+        id: "main",
+        rate_bs: Number(state.rateBs || 48.5),
+        rate_history: Array.isArray(state.rateHistory) ? state.rateHistory : [],
+        crate_stock: state.crateStock || {},
+        updated_at: new Date().toISOString()
+      };
+
+      var ops = [
+        client.from("clients").upsert(clientPayload, { onConflict: "id" }),
+        client.from("skus").upsert(skuPayload, { onConflict: "sku" }),
+        client.from("lots").upsert(lotPayload, { onConflict: "id" }),
+        client.from("invoices").upsert(invoicePayload, { onConflict: "id" }),
+        client.from("visits").upsert(visitPayload, { onConflict: "id" }),
+        client.from("consolidations").upsert(consPayload, { onConflict: "id" }),
+        client.from("purchases").upsert(purchasePayload, { onConflict: "id" }),
+        client.from("app_settings").upsert(settingsPayload, { onConflict: "id" })
+      ];
+
+      if (collectionPayload.length) {
+        ops.push(client.from("collections").upsert(collectionPayload, { onConflict: "id" }));
+      }
+
+      return Promise.all(ops)
+        .then(function (resList) {
+          for (var i = 0; i < resList.length; i++) {
+            if (resList[i].error) throw resList[i].error;
+          }
+          return client.from("invoice_items").delete().neq("id", 0).then(function (delRes) {
+            if (delRes.error) throw delRes.error;
+            if (!invoiceItemsPayload.length) return { error: null };
+            return client.from("invoice_items").insert(invoiceItemsPayload);
+          });
+        })
+        .then(function (itemsRes) {
+          if (itemsRes && itemsRes.error) throw itemsRes.error;
           setCloudStatus("synced");
           return true;
         })
         .catch(function (err) {
-          console.error("Error guardando erp_state en Supabase:", err);
+          console.error("Error guardando tablas SQL en Supabase:", err);
           setCloudStatus("offline");
           return false;
         });
@@ -491,8 +799,41 @@
       setCloudStatus("syncing");
       if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
       cloudSyncTimer = setTimeout(function () {
-        pushCloudStateNow();
-      }, 450);
+        pushSqlTablesNow();
+      }, 350);
+    }
+
+    function subscribeRealtimeSql() {
+      var client = getSupabaseClient();
+      if (!client || realtimeChannel) return;
+
+      var watchedTables = [
+        "clients", "skus", "lots", "invoices", "invoice_items",
+        "visits", "consolidations", "purchases", "collections", "app_settings"
+      ];
+
+      var ch = client.channel("distrifood-live-sql");
+      watchedTables.forEach(function (tbl) {
+        ch.on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: tbl },
+          function () {
+            if (isApplyingRemoteState || cloudSyncStatus === "syncing") return;
+            if (realtimeRefreshTimer) clearTimeout(realtimeRefreshTimer);
+            realtimeRefreshTimer = setTimeout(function () {
+              syncFromCloud(true);
+            }, 250);
+          }
+        );
+      });
+
+      ch.subscribe(function (status) {
+        if (status === "SUBSCRIBED") {
+          setCloudStatus("synced");
+        }
+      });
+
+      realtimeChannel = ch;
     }
 
     function registerMenuModule(tabId, renderFn) {
@@ -639,102 +980,17 @@
           return Object.assign({}, s, { pricesByType: Object.assign({}, s.pricesByType) });
         }),
         clients: DEFAULT_CLIENTS.slice(),
-        lots: [
-          { id: "L-101", sku: "PEP-2L", qty: 45, expiry: "2027-01-15", warehouse: "Almacén Principal" },
-          { id: "L-102", sku: "PEP-2L", qty: 60, expiry: "2027-04-10", warehouse: "Almacén Principal" },
-          { id: "L-201", sku: "7UP-1.5L", qty: 38, expiry: "2026-12-28", warehouse: "Almacén Principal" },
-          { id: "L-301", sku: "POL-LATA", qty: 50, expiry: "2027-02-20", warehouse: "Almacén Frío/Seco" },
-          { id: "L-401", sku: "SOL-RET", qty: 30, expiry: "2027-03-18", warehouse: "Almacén Principal" },
-          { id: "L-501", sku: "MIZ-600", qty: 55, expiry: "2027-06-30", warehouse: "Almacén Principal" }
-        ],
+        lots: [],
         quarantine: [],
         crateStock: { cesta_refresco_24: 180, cesta_cerveza_36: 140, botellon_garrafon: 95 },
-        clientCrateDebt: {
-          c1: { cesta_refresco_24: 12, cesta_cerveza_36: 4, botellon_garrafon: 2 },
-          c2: { cesta_refresco_24: 8, cesta_cerveza_36: 10, botellon_garrafon: 5 },
-          c3: { cesta_refresco_24: 5, cesta_cerveza_36: 3, botellon_garrafon: 0 },
-          c4: { cesta_refresco_24: 6, cesta_cerveza_36: 2, botellon_garrafon: 3 }
-        },
-        clientBalanceUsd: { c1: 145.60, c2: 210.00, c3: 0.00, c4: 88.40 },
+        clientCrateDebt: {},
+        clientBalanceUsd: {},
         collectionLog: [],
-        invoices: [
-          {
-            id: "FAC-1001",
-            date: "2026-11-22",
-            clientId: "c1",
-            sellerName: "Sofía Vendedor",
-            status: "En Despacho",
-            items: [
-              { sku: "PEP-2L", qty: 10, unitPriceUsd: 6.80, lotAllocations: [{ lotId: "L-101", qty: 10 }] },
-              { sku: "POL-LATA", qty: 5, unitPriceUsd: 14.50, lotAllocations: [{ lotId: "L-301", qty: 5 }] }
-            ],
-            cratesDelivered: { cesta_refresco_24: 4, cesta_cerveza_36: 5, botellon_garrafon: 0 },
-            cratesReturned: { cesta_refresco_24: 2, cesta_cerveza_36: 2, botellon_garrafon: 0 },
-            marginalNote: "Nota Marginal Retornables: +2 Cesta Refresco 24x entregados sin retorno (Saldo total cliente: 12) | +3 Cesta Cerveza 36x entregados sin retorno (Saldo total cliente: 4).",
-            totalUsd: 140.50,
-            returnsLog: []
-          },
-          {
-            id: "FAC-1002",
-            date: "2026-11-23",
-            clientId: "c2",
-            sellerName: "Mateo Supervisor",
-            status: "En Despacho",
-            items: [
-              { sku: "7UP-1.5L", qty: 8, unitPriceUsd: 5.35, lotAllocations: [{ lotId: "L-201", qty: 8 }] },
-              { sku: "MIZ-600", qty: 6, unitPriceUsd: 5.60, lotAllocations: [{ lotId: "L-501", qty: 6 }] }
-            ],
-            cratesDelivered: { cesta_refresco_24: 3, cesta_cerveza_36: 0, botellon_garrafon: 6 },
-            cratesReturned: { cesta_refresco_24: 1, cesta_cerveza_36: 0, botellon_garrafon: 4 },
-            marginalNote: "Nota Marginal Retornables: +2 Cesta Refresco 24x entregados sin retorno (Saldo total cliente: 8) | +2 Botellón / Garrafón entregados sin retorno (Saldo total cliente: 5).",
-            totalUsd: 76.40,
-            returnsLog: []
-          }
-        ],
+        invoices: [],
         deletedInvoices: [],
-        purchases: [
-          {
-            id: "CMP-501",
-            date: "2026-11-20",
-            supplier: "Alimentos Polar C.A.",
-            lines: [
-              { sku: "POL-LATA", qty: 50, costUsd: 10.20, lotId: "L-301", expiry: "2027-02-20" },
-              { sku: "SOL-RET", qty: 30, costUsd: 11.40, lotId: "L-401", expiry: "2027-03-18" }
-            ],
-            totalUsd: 852.00
-          }
-        ],
-        visits: [
-          {
-            id: "VIS-301",
-            date: "2026-11-23",
-            clientId: "c1",
-            userName: "Sofía Vendedor",
-            exhibicionOk: "Sí — Nevera y anaquel frontal",
-            stockOut: "No",
-            surveyScore: 5,
-            notes: "Pedido de reposición listo para despacho matutino."
-          }
-        ],
-        consolidations: [
-          {
-            id: "CONS-2026-01",
-            date: "2026-11-23",
-            truck: "Camión NQR-04 (Placa A78BC2D)",
-            driver: "José Contreras",
-            routeZone: "Ruta Centro / Norte",
-            invoiceIds: ["FAC-1001", "FAC-1002"],
-            skuTotals: [
-              { sku: "PEP-2L", name: "Pepsi Cola 2L (6-Pack)", qty: 10, weightKg: 124.0, totalUsd: 68.00 },
-              { sku: "POL-LATA", name: "Cerveza Polar Pilsen Lata 24x", qty: 5, weightKg: 44.5, totalUsd: 72.50 },
-              { sku: "7UP-1.5L", name: "7Up Limón 1.5L (6-Pack)", qty: 8, weightKg: 76.8, totalUsd: 42.80 },
-              { sku: "MIZ-600", name: "Agua Minalba 600ml (24-Pack)", qty: 6, weightKg: 88.8, totalUsd: 33.60 }
-            ],
-            grandUnits: 29,
-            grandWeightKg: 334.1,
-            grandUsd: 216.90
-          }
-        ],
+        purchases: [],
+        visits: [],
+        consolidations: [],
         draftSaleLines: [{ sku: "PEP-2L", qty: 4 }],
         draftPurchaseLines: [{ sku: "PEP-2L", qty: 20, costUsd: 4.70, expiry: "2027-05-15" }]
       };
@@ -831,7 +1087,7 @@
 
     function normalizeLoadedState(p) {
       var b = defaultState();
-      if (!p || typeof p !== "object" || !Array.isArray(p.invoices) || !Array.isArray(p.lots)) return b;
+      if (!p || typeof p !== "object") return b;
       var mergedCompany = Object.assign({}, DEFAULT_COMPANY, p.company || {});
       var mergedUsers = Array.isArray(p.users) && p.users.length
         ? p.users.map(function (u) {
@@ -856,13 +1112,6 @@
 
       var rateVal = (!isNaN(parseFloat(p.rateBs)) && parseFloat(p.rateBs) > 0) ? Number(parseFloat(p.rateBs).toFixed(4)) : b.rateBs;
       var histVal = normalizeRateHistory(p.rateHistory, rateVal);
-      var today = getTodayIsoDate();
-      for (var rIdx = 0; rIdx < histVal.length; rIdx++) {
-        if (histVal[rIdx].date === today) {
-          rateVal = Number(Number(histVal[rIdx].rateBs).toFixed(4));
-          break;
-        }
-      }
 
       return Object.assign({}, b, p, {
         company: mergedCompany,
@@ -882,13 +1131,17 @@
         routePresets: Array.isArray(p.routePresets) && p.routePresets.length ? p.routePresets.map(String) : b.routePresets,
         skus: mergedSkus,
         clients: mergedClients,
+        lots: Array.isArray(p.lots) ? p.lots : [],
+        invoices: Array.isArray(p.invoices) ? p.invoices : [],
+        purchases: Array.isArray(p.purchases) ? p.purchases : [],
+        visits: Array.isArray(p.visits) ? p.visits : [],
+        consolidations: Array.isArray(p.consolidations) ? p.consolidations : [],
         crateStock: Object.assign({}, b.crateStock, p.crateStock || {}),
         clientCrateDebt: Object.assign({}, b.clientCrateDebt, p.clientCrateDebt || {}),
         clientBalanceUsd: Object.assign({}, b.clientBalanceUsd, p.clientBalanceUsd || {}),
         collectionLog: Array.isArray(p.collectionLog) ? p.collectionLog : [],
         quarantine: Array.isArray(p.quarantine) ? p.quarantine : [],
         deletedInvoices: Array.isArray(p.deletedInvoices) ? p.deletedInvoices : [],
-        consolidations: Array.isArray(p.consolidations) ? p.consolidations : b.consolidations,
         draftSaleLines: Array.isArray(p.draftSaleLines) ? p.draftSaleLines : b.draftSaleLines,
         draftPurchaseLines: Array.isArray(p.draftPurchaseLines) ? p.draftPurchaseLines : b.draftPurchaseLines
       });
@@ -1486,12 +1739,12 @@
 
       var u = getUser();
       var initialCloudLabel = cloudSyncStatus === "synced"
-        ? "Nube: Sincronizado"
+        ? "SQL En Vivo: Sincronizado"
         : (cloudSyncStatus === "syncing"
-          ? "Nube: Guardando..."
+          ? "SQL En Vivo: Guardando..."
           : (cloudSyncStatus === "offline"
-            ? "Nube: Local / Sin red"
-            : (hasSupabaseConfig() ? "Nube: Conectando..." : "Nube: Local")));
+            ? "SQL En Vivo: Local / Sin red"
+            : (hasSupabaseConfig() ? "SQL En Vivo: Conectando..." : "SQL En Vivo: Local")));
 
       el.innerHTML =
         '<span class="pill pill-ok">Sesión activa: ' + esc(u.name) + ' · ' + esc(u.role) + '</span>' +
@@ -1521,7 +1774,7 @@
         state = defaultState();
         if (window.DistriFoodERP) window.DistriFoodERP.state = state;
         setNotice("ok", "Datos de demostración restablecidos.");
-        pushCloudStateNow();
+        pushSqlTablesNow();
         render();
       };
     }
@@ -1677,9 +1930,8 @@
         if (forceRender) render();
         return;
       }
-      fetchCloudState().then(function (remoteObj) {
+      fetchSqlTablesSnapshot().then(function (remoteObj) {
         if (!remoteObj) {
-          pushCloudStateNow();
           if (forceRender) render();
           return;
         }
@@ -1698,6 +1950,7 @@
       appBooted = true;
       render();
       syncFromCloud(false);
+      subscribeRealtimeSql();
     }
 
     window.DistriFoodERP = {
