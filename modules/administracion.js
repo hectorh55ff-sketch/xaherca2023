@@ -1,18 +1,19 @@
 (function () {
   "use strict";
 
-  var ERP = window.DistriFoodERP;
-  if (!ERP) return;
+  function getErp() {
+    return window.DistriFoodERP || null;
+  }
 
-  function isCurrentUserAdmin() {
-    var u = typeof ERP.getUser === "function" ? ERP.getUser() : null;
+  function isCurrentUserAdmin(ERP) {
+    var u = ERP && typeof ERP.getUser === "function" ? ERP.getUser() : null;
     if (!u) return false;
     var roleStr = String(u.role || u.cargo || "").trim().toLowerCase();
     return roleStr === "administrador" || roleStr === "admin";
   }
 
-  function getCrateFixedPriceBs(ct) {
-    var state = ERP.state || {};
+  function getCrateFixedPriceBs(ERP, ct) {
+    var state = (ERP && ERP.state) || {};
     var id = ct && ct.id ? ct.id : "";
     if (state.cratePricesBs && typeof state.cratePricesBs === "object" && id && state.cratePricesBs[id] != null && state.cratePricesBs[id] !== "") {
       var v1 = parseFloat(state.cratePricesBs[id]);
@@ -34,19 +35,19 @@
     return "Bs. " + num.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
-  function safeInitials(nameVal) {
-    if (typeof ERP.getCompanyInitials === "function") return ERP.getCompanyInitials(nameVal);
+  function safeInitials(ERP, nameVal) {
+    if (ERP && typeof ERP.getCompanyInitials === "function") return ERP.getCompanyInitials(nameVal);
     var clean = String(nameVal || "DF").trim();
     return clean ? clean.slice(0, 2).toUpperCase() : "DF";
   }
 
-  function getSupabaseClientSafe() {
-    if (typeof ERP.getSupabaseClient === "function") {
+  function getSupabaseClientSafe(ERP) {
+    if (ERP && typeof ERP.getSupabaseClient === "function") {
       return ERP.getSupabaseClient();
     }
     if (window.supabase && typeof window.supabase.createClient === "function") {
-      var url = ERP.SUPABASE_URL || "https://hanamjgoztionetdttsi.supabase.co";
-      var key = ERP.SUPABASE_PUBLISHABLE_KEY || "sb_publishable_1MVs4iqFLbztVBARt1waag_Sxj3ooJJ";
+      var url = (ERP && ERP.SUPABASE_URL) || "https://hanamjgoztionetdttsi.supabase.co";
+      var key = (ERP && ERP.SUPABASE_PUBLISHABLE_KEY) || "sb_publishable_1MVs4iqFLbztVBARt1waag_Sxj3ooJJ";
       if (url && key) {
         return window.supabase.createClient(url, key);
       }
@@ -54,11 +55,11 @@
     return null;
   }
 
-  function syncAppSettingsToSql(state) {
-    if (typeof ERP.saveAppSettingsSql === "function") {
+  function syncAppSettingsToSql(ERP, state) {
+    if (ERP && typeof ERP.saveAppSettingsSql === "function") {
       return ERP.saveAppSettingsSql();
     }
-    var client = getSupabaseClientSafe();
+    var client = getSupabaseClientSafe(ERP);
     if (!client || !state) return Promise.resolve(false);
 
     var mergedCrateStock = Object.assign({}, state.crateStock || {});
@@ -88,7 +89,7 @@
       });
   }
 
-  function openUserFormModal(existingUser) {
+  function openUserFormModal(ERP, existingUser) {
     var state = ERP.state;
     var rolePermsMap = (ERP.ROLE_PERMS && typeof ERP.ROLE_PERMS === "object") ? ERP.ROLE_PERMS : {};
     var allPermsList = Array.isArray(ERP.ALL_PERMS) ? ERP.ALL_PERMS : [];
@@ -147,7 +148,8 @@
   }
 
   function renderAdministracionView(root) {
-    if (!root || !ERP.state) return;
+    var ERP = getErp();
+    if (!root || !ERP || !ERP.state) return;
     try {
       var state = ERP.state;
       var comp = (typeof ERP.getCompany === "function" ? ERP.getCompany() : null) || {};
@@ -155,7 +157,7 @@
       var cTypes = typeof ERP.getCrateTypes === "function" ? ERP.getCrateTypes() : [];
       var rolePermsMap = (ERP.ROLE_PERMS && typeof ERP.ROLE_PERMS === "object") ? ERP.ROLE_PERMS : {};
       var allPermsList = Array.isArray(ERP.ALL_PERMS) ? ERP.ALL_PERMS : [];
-      var isAdmin = isCurrentUserAdmin();
+      var isAdmin = isCurrentUserAdmin(ERP);
       var pendingLogoDataUrl = comp.logoDataUrl || "";
       var todayStr = typeof ERP.getTodayIsoDate === "function" ? ERP.getTodayIsoDate() : new Date().toISOString().slice(0, 10);
       var rateHist = typeof ERP.normalizeRateHistory === "function"
@@ -171,7 +173,7 @@
       }
 
       var cratePriceRows = cTypes.map(function (ct) {
-        var currentPrice = getCrateFixedPriceBs(ct);
+        var currentPrice = getCrateFixedPriceBs(ERP, ct);
         var lastHist = null;
         for (var h = state.cratePriceHistory.length - 1; h >= 0; h--) {
           if (String(state.cratePriceHistory[h].crateId) === String(ct.id)) {
@@ -261,7 +263,7 @@
           '<div class="table-wrap" style="margin-top:14px;"><table><thead><tr><th>Fecha</th><th>Tasa Bs/$</th><th>Hora</th><th>Registrado Por</th><th>Acciones</th></tr></thead><tbody>' + rateRows + '</tbody></table></div>' +
         '</div>' +
         '<div class="card">' +
-          '<div class="card-header"><div><h2 class="card-title">Datos de la Empresa y Logo</h2><p class="muted">Agregue o edite el nombre de la empresa, dirección, teléfonos y logotipo que se muestran en el sistema.</p></div><div class="logo-preview-box" id="adm-logo-preview">' + (pendingLogoDataUrl ? '<img src="' + ERP.esc(pendingLogoDataUrl) + '" alt="Logo" />' : ERP.esc(safeInitials(comp.name))) + '</div></div>' +
+          '<div class="card-header"><div><h2 class="card-title">Datos de la Empresa y Logo</h2><p class="muted">Agregue o edite el nombre de la empresa, dirección, teléfonos y logotipo que se muestran en el sistema.</p></div><div class="logo-preview-box" id="adm-logo-preview">' + (pendingLogoDataUrl ? '<img src="' + ERP.esc(pendingLogoDataUrl) + '" alt="Logo" />' : ERP.esc(safeInitials(ERP, comp.name))) + '</div></div>' +
           '<div class="grid-3"><div class="field"><label>Nombre de la Empresa *</label><input type="text" id="adm-comp-name" value="' + ERP.esc(comp.name || "") + '" placeholder="Ej. Distribuidora Central C.A." /></div><div class="field"><label>RIF / Identificación Fiscal</label><input type="text" id="adm-comp-rif" value="' + ERP.esc(comp.rif || "") + '" placeholder="Ej. J-40982133-0" /></div><div class="field"><label>Teléfonos de Contacto *</label><input type="text" id="adm-comp-phones" value="' + ERP.esc(comp.phones || "") + '" placeholder="Ej. 0414-3120091 / 0261-7410020" /></div></div>' +
           '<div class="grid-2"><div class="field"><label>Dirección Fiscal / Operativa *</label><input type="text" id="adm-comp-address" value="' + ERP.esc(comp.address || "") + '" placeholder="Ej. Av. 15 Delicias, Sector Norte" /></div><div class="field"><label>Correo de Contacto</label><input type="email" id="adm-comp-email" value="' + ERP.esc(comp.email || "") + '" placeholder="Ej. administracion@empresa.com" /></div></div>' +
           '<div class="grid-2" style="align-items:end;"><div class="field" style="margin-bottom:0;"><label>Subir Logo de la Empresa (Imagen)</label><input type="file" id="adm-comp-logo-file" accept="image/*" /></div><div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;"><button type="button" class="sm" id="btn-adm-clear-logo">Quitar Logo</button><button type="button" class="success" id="btn-adm-save-company">Guardar Datos de Empresa</button></div></div>' +
@@ -274,7 +276,7 @@
       var saveCratePriceBtns = root.querySelectorAll("button[data-save-crate-price]");
       for (var cpIdx = 0; cpIdx < saveCratePriceBtns.length; cpIdx++) {
         saveCratePriceBtns[cpIdx].onclick = function () {
-          if (!isCurrentUserAdmin()) {
+          if (!isCurrentUserAdmin(ERP)) {
             ERP.setNotice("bad", "Acceso restringido: solo un usuario con rol Administrador puede modificar el precio fijo en Bs. de los casilleros.");
             ERP.render();
             return;
@@ -289,7 +291,7 @@
           }
           newPrice = Number(newPrice.toFixed(2));
           var ctObj = typeof ERP.getCrateType === "function" ? ERP.getCrateType(crateId) : { id: crateId, name: crateId };
-          var oldPrice = getCrateFixedPriceBs(ctObj);
+          var oldPrice = getCrateFixedPriceBs(ERP, ctObj);
 
           if (oldPrice !== newPrice) {
             var confirmMsg =
@@ -325,7 +327,7 @@
 
           ERP.setNotice("ok", "Precio fijo de '" + (ctObj && ctObj.name ? ctObj.name : crateId) + "' establecido en " + formatFixedBs(newPrice) + ".");
           ERP.saveState();
-          syncAppSettingsToSql(state);
+          syncAppSettingsToSql(ERP, state);
           ERP.render();
         };
       }
@@ -341,7 +343,7 @@
         if (!saved) { ERP.setNotice("bad", "No se pudo guardar la tasa cambiaria."); ERP.render(); return; }
         ERP.setNotice("ok", "Tasa del " + saved.date + " guardada en Bs. " + Number(saved.rateBs).toFixed(4) + " por $.");
         ERP.saveState();
-        syncAppSettingsToSql(state);
+        syncAppSettingsToSql(ERP, state);
         ERP.render();
       };
 
@@ -372,7 +374,7 @@
           }
           ERP.setNotice("ok", "Registro de tasa de la fecha " + dStr + " eliminado.");
           ERP.saveState();
-          syncAppSettingsToSql(state);
+          syncAppSettingsToSql(ERP, state);
           ERP.render();
         };
       }
@@ -387,7 +389,7 @@
           reader.onload = function (ev) {
             pendingLogoDataUrl = ev && ev.target ? ev.target.result : "";
             var box = document.getElementById("adm-logo-preview");
-            if (box) box.innerHTML = pendingLogoDataUrl ? '<img src="' + ERP.esc(pendingLogoDataUrl) + '" alt="Logo" />' : ERP.esc(safeInitials((document.getElementById("adm-comp-name") && document.getElementById("adm-comp-name").value) || comp.name));
+            if (box) box.innerHTML = pendingLogoDataUrl ? '<img src="' + ERP.esc(pendingLogoDataUrl) + '" alt="Logo" />' : ERP.esc(safeInitials(ERP, (document.getElementById("adm-comp-name") && document.getElementById("adm-comp-name").value) || comp.name));
           };
           reader.readAsDataURL(f);
         };
@@ -397,7 +399,7 @@
         pendingLogoDataUrl = "";
         if (logoFileInp) logoFileInp.value = "";
         var box = document.getElementById("adm-logo-preview");
-        if (box) box.textContent = safeInitials((document.getElementById("adm-comp-name") && document.getElementById("adm-comp-name").value) || comp.name);
+        if (box) box.textContent = safeInitials(ERP, (document.getElementById("adm-comp-name") && document.getElementById("adm-comp-name").value) || comp.name);
       };
 
       document.getElementById("btn-adm-save-company").onclick = function () {
@@ -416,13 +418,13 @@
         ERP.render();
       };
 
-      document.getElementById("btn-adm-new-user").onclick = function () { openUserFormModal(null); };
+      document.getElementById("btn-adm-new-user").onclick = function () { openUserFormModal(ERP, null); };
       var editUserBtns = root.querySelectorAll("button[data-edit-user]");
       for (var i = 0; i < editUserBtns.length; i++) {
         editUserBtns[i].onclick = function () {
           var uid = this.getAttribute("data-edit-user");
           var target = (typeof ERP.getUsers === "function" ? ERP.getUsers() : []).filter(function (item) { return item.id === uid; })[0];
-          if (target) openUserFormModal(target);
+          if (target) openUserFormModal(ERP, target);
         };
       }
       var delUserBtns = root.querySelectorAll("button[data-del-user]");
@@ -450,8 +452,15 @@
     }
   }
 
-  ERP.registerMenuModule("administracion", renderAdministracionView);
-})();
-```[cite: 9]
+  function registerAdminModule() {
+    var erpRef = getErp();
+    if (erpRef && typeof erpRef.registerMenuModule === "function") {
+      erpRef.registerMenuModule("administracion", renderAdministracionView);
+    }
+  }
 
-Con `administracion.js` listo, ¿qué módulo de `modules/` te gustaría adjuntar o revisar a continuación (por ejemplo `clientes.js`, `ventas.js`, `despacho.js`, `almacen.js` o `retornables.js`)?
+  registerAdminModule();
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", registerAdminModule);
+  }
+})();
