@@ -390,11 +390,31 @@
     var realtimeChannel = null;
     var realtimeRefreshTimer = null;
 
+    var ALL_15_TABLES = [
+      "users",
+      "company_settings",
+      "clients",
+      "skus",
+      "lots",
+      "invoices",
+      "invoice_items",
+      "deleted_invoices",
+      "visits",
+      "consolidations",
+      "purchases",
+      "supplier_crate_debts",
+      "collections",
+      "quarantine",
+      "app_settings"
+    ];
+
     var mem = {};
     var MENU_MODULES = {};
     var cloudSyncTimer = null;
     var cloudSyncStatus = "local";
     var isApplyingRemoteState = false;
+    var isPushingCloud = false;
+    var lastLocalPushAt = 0;
     var appBooted = false;
 
     function hasSupabaseConfig() {
@@ -442,31 +462,64 @@
       }
 
       return Promise.all([
+        client.from("users").select("*").order("id", { ascending: true }),
+        client.from("company_settings").select("*").eq("id", "main").maybeSingle(),
         client.from("clients").select("*").order("id", { ascending: true }),
         client.from("skus").select("*").order("sku", { ascending: true }),
         client.from("lots").select("*").order("expiry", { ascending: true }),
         client.from("invoices").select("*").order("date", { ascending: false }),
         client.from("invoice_items").select("*").order("id", { ascending: true }),
+        client.from("deleted_invoices").select("*").order("deleted_at", { ascending: false }),
         client.from("visits").select("*").order("date", { ascending: false }),
         client.from("consolidations").select("*").order("date", { ascending: false }),
         client.from("purchases").select("*").order("date", { ascending: false }),
-        client.from("collections").select("*").order("date", { ascending: false }),
+        client.from("supplier_crate_debts").select("*").order("updated_at", { ascending: false }),
+        client.from("collections").select("*").order("tx_date", { ascending: false }),
+        client.from("quarantine").select("*").order("date", { ascending: false }),
         client.from("app_settings").select("*").eq("id", "main").maybeSingle()
       ]).then(function (results) {
         for (var i = 0; i < results.length; i++) {
           if (results[i].error) throw results[i].error;
         }
 
-        var clientRows = results[0].data || [];
-        var skuRows = results[1].data || [];
-        var lotRows = results[2].data || [];
-        var invoiceRows = results[3].data || [];
-        var itemRows = results[4].data || [];
-        var visitRows = results[5].data || [];
-        var consRows = results[6].data || [];
-        var purchaseRows = results[7].data || [];
-        var collectionRows = results[8].data || [];
-        var settingsRow = results[9].data || null;
+        var userRows = results[0].data || [];
+        var companyRow = results[1].data || null;
+        var clientRows = results[2].data || [];
+        var skuRows = results[3].data || [];
+        var lotRows = results[4].data || [];
+        var invoiceRows = results[5].data || [];
+        var itemRows = results[6].data || [];
+        var deletedInvRows = results[7].data || [];
+        var visitRows = results[8].data || [];
+        var consRows = results[9].data || [];
+        var purchaseRows = results[10].data || [];
+        var supplierCrateDebtRows = results[11].data || [];
+        var collectionRows = results[12].data || [];
+        var quarantineRows = results[13].data || [];
+        var settingsRow = results[14].data || null;
+
+        var usersMapped = userRows.map(function (u) {
+          return {
+            id: u.id,
+            name: u.name,
+            password: u.password != null ? String(u.password) : "1234",
+            role: u.role || "Vendedor",
+            zone: u.zone || "General",
+            phone: u.phone || "",
+            email: u.email || "",
+            active: u.active !== false,
+            perms: Array.isArray(u.perms) ? u.perms : (ROLE_PERMS[u.role] || ROLE_PERMS.Vendedor).slice()
+          };
+        });
+
+        var companyMapped = companyRow ? {
+          name: companyRow.name || DEFAULT_COMPANY.name,
+          rif: companyRow.rif || "",
+          phones: companyRow.phones || "",
+          address: companyRow.address || "",
+          email: companyRow.email || "",
+          logoDataUrl: companyRow.logo_data_url || ""
+        } : state.company;
 
         var itemsByInvoice = {};
         for (var k = 0; k < itemRows.length; k++) {
@@ -531,8 +584,12 @@
           return {
             id: inv.id,
             date: inv.date,
+            deliveredDate: inv.delivered_date || "",
             clientId: inv.client_id,
             sellerName: inv.seller_name || "",
+            zone: inv.zone || "",
+            truck: inv.truck || "",
+            payCond: inv.pay_cond || "",
             status: inv.status || "En Despacho",
             items: itemsByInvoice[inv.id] || [],
             cratesDelivered: inv.crates_delivered && typeof inv.crates_delivered === "object" ? inv.crates_delivered : {},
@@ -540,6 +597,24 @@
             marginalNote: inv.marginal_note || "",
             totalUsd: Number(inv.total_usd || 0),
             returnsLog: Array.isArray(inv.returns_log) ? inv.returns_log : []
+          };
+        });
+
+        var deletedInvoicesMapped = deletedInvRows.map(function (d) {
+          return {
+            id: d.id,
+            date: d.date || "",
+            clientId: d.client_id || "",
+            sellerName: d.seller_name || "",
+            zone: d.zone || "",
+            truck: d.truck || "",
+            items: Array.isArray(d.items) ? d.items : [],
+            marginalNote: d.marginal_note || "",
+            returnsLog: Array.isArray(d.returns_log) ? d.returns_log : [],
+            totalUsd: Number(d.total_usd || 0),
+            reason: d.reason || "",
+            deletedBy: d.deleted_by || "",
+            deletedAt: d.deleted_at || ""
           };
         });
 
@@ -581,33 +656,81 @@
           };
         });
 
-        var collectionLogMapped = collectionRows.map(function (col) {
+        var supplierCrateDebtsMapped = supplierCrateDebtRows.map(function (sd) {
           return {
-            id: col.id,
-            date: col.date,
-            clientId: col.client_id,
-            amountUsd: Number(col.amount_usd || 0),
-            rateBs: col.rate_bs != null ? Number(col.rate_bs) : null,
-            method: col.method || "",
-            notes: col.notes || "",
-            userName: col.user_name || ""
+            id: sd.id,
+            supplierKey: sd.supplier_key || "",
+            supplierName: sd.supplier_name || "",
+            crateId: sd.crate_id || "",
+            crateName: sd.crate_name || "",
+            totalQty: Number(sd.total_qty || 0),
+            pendingQty: Number(sd.pending_qty || 0),
+            status: sd.status || "Pendiente",
+            createdAt: sd.created_at || "",
+            updatedAt: sd.updated_at || "",
+            history: Array.isArray(sd.history) ? sd.history : [],
+            settlements: Array.isArray(sd.settlements) ? sd.settlements : []
           };
         });
 
+        var collectionLogMapped = collectionRows.map(function (col) {
+          return {
+            id: col.id,
+            txDate: col.tx_date || col.date || "",
+            date: col.tx_date || col.date || "",
+            clientId: col.client_id,
+            type: col.type || "",
+            paymentMethod: col.payment_method || col.method || "",
+            amountUsd: col.amount_usd != null ? Number(col.amount_usd) : null,
+            rateBs: col.rate_bs != null ? Number(col.rate_bs) : null,
+            method: col.payment_method || col.method || "",
+            recordedBy: col.recorded_by || col.user_name || "",
+            userName: col.recorded_by || col.user_name || "",
+            detail: col.detail || col.notes || "",
+            notes: col.detail || col.notes || ""
+          };
+        });
+
+        var quarantineMapped = quarantineRows.map(function (q) {
+          return {
+            id: q.id,
+            date: q.date || "",
+            invoiceId: q.invoice_id || "",
+            sku: q.sku || "",
+            qty: Number(q.qty || 0),
+            reason: q.reason || ""
+          };
+        });
+
+        var presetsObj = settingsRow && settingsRow.presets && typeof settingsRow.presets === "object"
+          ? settingsRow.presets
+          : {};
+
         return Object.assign({}, state, {
+          users: usersMapped.length ? usersMapped : state.users,
+          company: companyMapped,
           clients: clientsMapped.length ? clientsMapped : state.clients,
           skus: skusMapped.length ? skusMapped : state.skus,
           lots: lotsMapped,
           invoices: invoicesMapped,
+          deletedInvoices: deletedInvoicesMapped,
           visits: visitsMapped,
           consolidations: consMapped,
           purchases: purchasesMapped,
+          supplierCrateDebts: supplierCrateDebtsMapped,
           collectionLog: collectionLogMapped,
+          quarantine: quarantineMapped,
           clientBalanceUsd: clientBalanceUsd,
           clientCrateDebt: clientCrateDebt,
           rateBs: settingsRow && settingsRow.rate_bs != null ? Number(settingsRow.rate_bs) : state.rateBs,
           rateHistory: settingsRow && Array.isArray(settingsRow.rate_history) ? settingsRow.rate_history : state.rateHistory,
-          crateStock: settingsRow && settingsRow.crate_stock && typeof settingsRow.crate_stock === "object" ? settingsRow.crate_stock : state.crateStock
+          crateTypes: settingsRow && Array.isArray(settingsRow.crate_types) && settingsRow.crate_types.length ? settingsRow.crate_types : state.crateTypes,
+          crateStock: settingsRow && settingsRow.crate_stock && typeof settingsRow.crate_stock === "object" ? settingsRow.crate_stock : state.crateStock,
+          cratePricesBs: settingsRow && settingsRow.crate_prices_bs && typeof settingsRow.crate_prices_bs === "object" ? settingsRow.crate_prices_bs : state.cratePricesBs,
+          cratePriceHistory: settingsRow && Array.isArray(settingsRow.crate_price_history) ? settingsRow.crate_price_history : state.cratePriceHistory,
+          truckPresets: Array.isArray(presetsObj.truck) && presetsObj.truck.length ? presetsObj.truck : state.truckPresets,
+          driverPresets: Array.isArray(presetsObj.driver) && presetsObj.driver.length ? presetsObj.driver : state.driverPresets,
+          routePresets: Array.isArray(presetsObj.route) && presetsObj.route.length ? presetsObj.route : state.routePresets
         });
       }).catch(function (err) {
         console.error("Error leyendo tablas SQL en Supabase:", err);
@@ -622,21 +745,50 @@
         setCloudStatus("offline");
         return Promise.resolve(false);
       }
+      isPushingCloud = true;
+      lastLocalPushAt = Date.now();
       setCloudStatus("syncing");
+
+      var comp = getCompany();
+      var usersPayload = getUsers().map(function (u) {
+        return {
+          id: u.id,
+          name: u.name,
+          password: u.password != null ? String(u.password) : "1234",
+          role: u.role || "Vendedor",
+          zone: u.zone || "General",
+          phone: u.phone || "",
+          email: u.email || "",
+          active: u.active !== false,
+          perms: Array.isArray(u.perms) ? u.perms : [],
+          updated_at: new Date().toISOString()
+        };
+      });
+
+      var companyPayload = {
+        id: "main",
+        name: comp.name || "DistriFood ERP",
+        rif: comp.rif || "",
+        phones: comp.phones || "",
+        address: comp.address || "",
+        email: comp.email || "",
+        logo_data_url: comp.logoDataUrl || "",
+        updated_at: new Date().toISOString()
+      };
 
       var clientPayload = (state.clients || []).map(function (c) {
         ensureClientDebt(c.id);
         return {
           id: c.id,
           name: c.name,
-          rif: c.rif || null,
+          rif: c.rif || "",
           client_type: c.clientType || "Normal",
-          zone: c.zone || null,
+          zone: c.zone || "",
           credit_usd: Number(c.creditUsd || 0),
           credit_days: Number(c.creditDays || 0),
-          phone: c.phone || null,
-          email: c.email || null,
-          address: c.address || null,
+          phone: c.phone || "",
+          email: c.email || "",
+          address: c.address || "",
           balance_usd: Number((state.clientBalanceUsd && state.clientBalanceUsd[c.id]) || 0),
           crate_debt: (state.clientCrateDebt && state.clientCrateDebt[c.id]) || {},
           updated_at: new Date().toISOString()
@@ -647,7 +799,8 @@
         return {
           sku: s.sku,
           name: s.name,
-          brand: s.brand || null,
+          brand: s.brand || "General",
+          category: s.category || "",
           price_usd: Number(s.priceUsd || 0),
           prices_by_type: s.pricesByType || {},
           cost_usd: Number(s.costUsd || 0),
@@ -672,12 +825,16 @@
         return {
           id: inv.id,
           date: inv.date,
+          delivered_date: inv.deliveredDate || "",
           client_id: inv.clientId,
-          seller_name: inv.sellerName || null,
+          seller_name: inv.sellerName || "",
+          zone: inv.zone || "",
+          truck: inv.truck || "",
+          pay_cond: inv.payCond || "",
           status: inv.status || "En Despacho",
           crates_delivered: inv.cratesDelivered || {},
           crates_returned: inv.cratesReturned || {},
-          marginal_note: inv.marginalNote || null,
+          marginal_note: inv.marginalNote || "",
           total_usd: Number(inv.totalUsd || 0),
           returns_log: Array.isArray(inv.returnsLog) ? inv.returnsLog : [],
           updated_at: new Date().toISOString()
@@ -697,16 +854,36 @@
         });
       });
 
+      var deletedInvPayload = (state.deletedInvoices || []).map(function (d) {
+        return {
+          id: d.id,
+          date: d.date || "",
+          client_id: d.clientId || "",
+          seller_name: d.sellerName || "",
+          zone: d.zone || "",
+          truck: d.truck || "",
+          items: Array.isArray(d.items) ? d.items : [],
+          marginal_note: d.marginalNote || "",
+          returns_log: Array.isArray(d.returnsLog) ? d.returnsLog : [],
+          total_usd: Number(d.totalUsd || 0),
+          reason: d.reason || "",
+          deleted_by: d.deletedBy || "",
+          deleted_at: d.deletedAt || "",
+          updated_at: new Date().toISOString()
+        };
+      });
+
       var visitPayload = (state.visits || []).map(function (v) {
         return {
           id: v.id,
           date: v.date,
           client_id: v.clientId,
-          user_name: v.userName || null,
-          exhibicion_ok: v.exhibicionOk || null,
-          stock_out: v.stockOut || null,
+          user_name: v.userName || "",
+          exhibicion_ok: v.exhibicionOk || "",
+          stock_out: v.stockOut || "No",
           survey_score: Number(v.surveyScore || 5),
-          notes: v.notes || null
+          notes: v.notes || "",
+          updated_at: new Date().toISOString()
         };
       });
 
@@ -714,14 +891,15 @@
         return {
           id: co.id,
           date: co.date,
-          truck: co.truck || null,
-          driver: co.driver || null,
-          route_zone: co.routeZone || null,
+          truck: co.truck || "",
+          driver: co.driver || "",
+          route_zone: co.routeZone || "",
           invoice_ids: Array.isArray(co.invoiceIds) ? co.invoiceIds : [],
-          sku_totals: Array.isArray(co.skuTotals) ? co.sku_totals : [],
+          sku_totals: Array.isArray(co.skuTotals) ? co.skuTotals : [],
           grand_units: Number(co.grandUnits || 0),
           grand_weight_kg: Number(co.grandWeightKg || 0),
-          grand_usd: Number(co.grandUsd || 0)
+          grand_usd: Number(co.grandUsd || 0),
+          updated_at: new Date().toISOString()
         };
       });
 
@@ -731,20 +909,51 @@
           date: p.date,
           supplier: p.supplier || "Proveedor",
           lines: Array.isArray(p.lines) ? p.lines : [],
-          total_usd: Number(p.totalUsd || 0)
+          total_usd: Number(p.totalUsd || 0),
+          updated_at: new Date().toISOString()
+        };
+      });
+
+      var supplierCrateDebtsPayload = (state.supplierCrateDebts || []).map(function (sd) {
+        return {
+          id: sd.id,
+          supplier_key: sd.supplierKey || "",
+          supplier_name: sd.supplierName || "",
+          crate_id: sd.crateId || "",
+          crate_name: sd.crateName || "",
+          total_qty: Number(sd.totalQty || 0),
+          pending_qty: Number(sd.pendingQty || 0),
+          status: sd.status || "Pendiente",
+          created_at: sd.createdAt || "",
+          updated_at: sd.updatedAt || new Date().toISOString(),
+          history: Array.isArray(sd.history) ? sd.history : [],
+          settlements: Array.isArray(sd.settlements) ? sd.settlements : []
         };
       });
 
       var collectionPayload = (state.collectionLog || []).map(function (col) {
         return {
           id: col.id,
-          date: col.date,
-          client_id: col.clientId,
-          amount_usd: Number(col.amountUsd || 0),
-          rate_bs: col.rateBs != null ? Number(col.rateBs) : null,
-          method: col.method || null,
-          notes: col.notes || null,
-          user_name: col.userName || null
+          tx_date: col.txDate || col.date || "",
+          client_id: col.clientId || "",
+          type: col.type || "",
+          payment_method: col.paymentMethod || col.method || "",
+          amount_usd: col.amountUsd != null ? Number(col.amountUsd) : null,
+          recorded_by: col.recordedBy || col.userName || "",
+          detail: col.detail || col.notes || "",
+          updated_at: new Date().toISOString()
+        };
+      });
+
+      var quarantinePayload = (state.quarantine || []).map(function (q) {
+        return {
+          id: q.id,
+          date: q.date || "",
+          invoice_id: q.invoiceId || "",
+          sku: q.sku || "",
+          qty: Number(q.qty || 0),
+          reason: q.reason || "",
+          updated_at: new Date().toISOString()
         };
       });
 
@@ -752,23 +961,52 @@
         id: "main",
         rate_bs: Number(state.rateBs || 48.5),
         rate_history: Array.isArray(state.rateHistory) ? state.rateHistory : [],
+        crate_types: getCrateTypes(),
         crate_stock: state.crateStock || {},
+        crate_prices_bs: state.cratePricesBs && typeof state.cratePricesBs === "object" ? state.cratePricesBs : {},
+        crate_price_history: Array.isArray(state.cratePriceHistory) ? state.cratePriceHistory : [],
+        presets: {
+          truck: getPresets("truck"),
+          driver: getPresets("driver"),
+          route: getPresets("route")
+        },
         updated_at: new Date().toISOString()
       };
 
       var ops = [
+        client.from("users").upsert(usersPayload, { onConflict: "id" }),
+        client.from("company_settings").upsert(companyPayload, { onConflict: "id" }),
         client.from("clients").upsert(clientPayload, { onConflict: "id" }),
         client.from("skus").upsert(skuPayload, { onConflict: "sku" }),
-        client.from("lots").upsert(lotPayload, { onConflict: "id" }),
-        client.from("invoices").upsert(invoicePayload, { onConflict: "id" }),
-        client.from("visits").upsert(visitPayload, { onConflict: "id" }),
-        client.from("consolidations").upsert(consPayload, { onConflict: "id" }),
-        client.from("purchases").upsert(purchasePayload, { onConflict: "id" }),
         client.from("app_settings").upsert(settingsPayload, { onConflict: "id" })
       ];
 
+      if (lotPayload.length) {
+        ops.push(client.from("lots").upsert(lotPayload, { onConflict: "id" }));
+      }
+      if (invoicePayload.length) {
+        ops.push(client.from("invoices").upsert(invoicePayload, { onConflict: "id" }));
+      }
+      if (deletedInvPayload.length) {
+        ops.push(client.from("deleted_invoices").upsert(deletedInvPayload, { onConflict: "id" }));
+      }
+      if (visitPayload.length) {
+        ops.push(client.from("visits").upsert(visitPayload, { onConflict: "id" }));
+      }
+      if (consPayload.length) {
+        ops.push(client.from("consolidations").upsert(consPayload, { onConflict: "id" }));
+      }
+      if (purchasePayload.length) {
+        ops.push(client.from("purchases").upsert(purchasePayload, { onConflict: "id" }));
+      }
+      if (supplierCrateDebtsPayload.length) {
+        ops.push(client.from("supplier_crate_debts").upsert(supplierCrateDebtsPayload, { onConflict: "id" }));
+      }
       if (collectionPayload.length) {
         ops.push(client.from("collections").upsert(collectionPayload, { onConflict: "id" }));
+      }
+      if (quarantinePayload.length) {
+        ops.push(client.from("quarantine").upsert(quarantinePayload, { onConflict: "id" }));
       }
 
       return Promise.all(ops)
@@ -784,11 +1022,13 @@
         })
         .then(function (itemsRes) {
           if (itemsRes && itemsRes.error) throw itemsRes.error;
+          isPushingCloud = false;
           setCloudStatus("synced");
           return true;
         })
         .catch(function (err) {
           console.error("Error guardando tablas SQL en Supabase:", err);
+          isPushingCloud = false;
           setCloudStatus("offline");
           return false;
         });
@@ -800,29 +1040,25 @@
       if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
       cloudSyncTimer = setTimeout(function () {
         pushSqlTablesNow();
-      }, 350);
+      }, 300);
     }
 
     function subscribeRealtimeSql() {
       var client = getSupabaseClient();
       if (!client || realtimeChannel) return;
 
-      var watchedTables = [
-        "clients", "skus", "lots", "invoices", "invoice_items",
-        "visits", "consolidations", "purchases", "collections", "app_settings"
-      ];
-
-      var ch = client.channel("distrifood-live-sql");
-      watchedTables.forEach(function (tbl) {
+      var ch = client.channel("distrifood-live-sql-15");
+      ALL_15_TABLES.forEach(function (tbl) {
         ch.on(
           "postgres_changes",
           { event: "*", schema: "public", table: tbl },
           function () {
-            if (isApplyingRemoteState || cloudSyncStatus === "syncing") return;
+            if (isApplyingRemoteState || isPushingCloud) return;
+            if (Date.now() - lastLocalPushAt < 700) return;
             if (realtimeRefreshTimer) clearTimeout(realtimeRefreshTimer);
             realtimeRefreshTimer = setTimeout(function () {
               syncFromCloud(true);
-            }, 250);
+            }, 180);
           }
         );
       });
@@ -983,6 +1219,9 @@
         lots: [],
         quarantine: [],
         crateStock: { cesta_refresco_24: 180, cesta_cerveza_36: 140, botellon_garrafon: 95 },
+        cratePricesBs: {},
+        cratePriceHistory: [],
+        supplierCrateDebts: [],
         clientCrateDebt: {},
         clientBalanceUsd: {},
         collectionLog: [],
@@ -1137,6 +1376,9 @@
         visits: Array.isArray(p.visits) ? p.visits : [],
         consolidations: Array.isArray(p.consolidations) ? p.consolidations : [],
         crateStock: Object.assign({}, b.crateStock, p.crateStock || {}),
+        cratePricesBs: Object.assign({}, b.cratePricesBs, p.cratePricesBs || {}),
+        cratePriceHistory: Array.isArray(p.cratePriceHistory) ? p.cratePriceHistory : [],
+        supplierCrateDebts: Array.isArray(p.supplierCrateDebts) ? p.supplierCrateDebts : [],
         clientCrateDebt: Object.assign({}, b.clientCrateDebt, p.clientCrateDebt || {}),
         clientBalanceUsd: Object.assign({}, b.clientBalanceUsd, p.clientBalanceUsd || {}),
         collectionLog: Array.isArray(p.collectionLog) ? p.collectionLog : [],
@@ -1936,7 +2178,15 @@
           return;
         }
         isApplyingRemoteState = true;
+        var prevUserId = state.currentUserId;
+        var prevLoggedIn = state.isLoggedIn;
+        var prevTab = state.activeTab;
         state = normalizeLoadedState(remoteObj);
+        if (prevUserId && state.users.some(function (u) { return u.id === prevUserId; })) {
+          state.currentUserId = prevUserId;
+        }
+        state.isLoggedIn = prevLoggedIn;
+        if (prevTab) state.activeTab = prevTab;
         setStore(STORAGE_KEY, JSON.stringify(state));
         if (window.DistriFoodERP) window.DistriFoodERP.state = state;
         isApplyingRemoteState = false;
@@ -1960,6 +2210,7 @@
       DEFAULT_CRATE_TYPES: DEFAULT_CRATE_TYPES,
       registerMenuModule: registerMenuModule,
       saveState: saveState,
+      pushSqlTablesNow: pushSqlTablesNow,
       render: render,
       setNotice: setNotice,
       openModal: openModal,
